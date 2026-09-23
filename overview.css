@@ -10,6 +10,13 @@
 .ovw-hero-kpi strong{display:block;font-size:26px;line-height:1.1}
 .ovw-hero-kpi span{display:block;margin-top:4px;font-size:9px;color:#cfe8e3;white-space:nowrap}
 .ovw-note{padding:10px 14px;margin-bottom:12px;background:#fff8e8;border:1px solid #f0dfb0;color:#7a5f1f;font-size:10.5px;line-height:1.6;border-radius:3px}
+.ovw-daykpi-panel{margin-bottom:12px}
+.ovw-daykpi-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;padding:14px 18px}
+.ovw-daykpi-item{text-align:center;padding:10px 6px;background:#f7fbfa;border:1px solid var(--line);border-radius:4px}
+.ovw-daykpi-item strong{display:block;font-size:19px;line-height:1.15;color:var(--teal)}
+.ovw-daykpi-item span{display:block;margin-top:4px;font-size:9.5px;color:var(--muted);font-weight:700}
+@media(max-width:1200px){.ovw-daykpi-grid{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:600px){.ovw-daykpi-grid{grid-template-columns:repeat(2,1fr)}}
 .ovw-stagebar{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:12px}
 .ovw-stage{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:14px 8px 12px;background:#fff;border:1px solid var(--line);border-top:3px solid var(--c);cursor:pointer;font:inherit;color:var(--ink);transition:transform .12s,box-shadow .12s}
 .ovw-stage:hover{transform:translateY(-2px);box-shadow:0 6px 16px #0002}
@@ -27,6 +34,17 @@
 .ovw-state-done{background:#e3f0ee;color:var(--teal)}
 .ovw-src{display:block;margin-top:3px;color:var(--muted);font-size:8.5px}
 .ovw-src-live{color:var(--teal);font-weight:700}
+.ovw-plannote{display:block;margin-top:3px;color:#b3413a;font-weight:700;font-size:9.5px}
+.ovw-weaveloc{display:inline-block;padding:3px 8px;border-radius:3px;font-size:9.5px;font-weight:900;letter-spacing:.02em;white-space:nowrap}
+.ovw-weaveloc-in{background:#e3f0ec;color:var(--teal)}
+.ovw-weaveloc-out{background:#f6ece0;color:#a06a24}
+/* ตรึงหัวรายการ (แถบค้นหา/กรอง + หัวคอลัมน์ตาราง) ไว้บนสุดเวลาเลื่อนหน้าลง/ขึ้น
+   หมายเหตุ: .table-wrap{overflow:auto} เดิมทำให้กลายเป็น scroll container ของตัวเอง ซึ่งจะทำให้
+   position:sticky ยึดติดกับกล่องนั้นแทนที่จะยึดกับการเลื่อนหน้าเว็บจริง ๆ — ปรับเฉพาะตารางภาพรวมนี้
+   ให้เลื่อนตามแนวนอนได้เหมือนเดิม แต่ไม่ตัดการเลื่อนแนวตั้งของหน้า เพื่อให้ sticky ทำงานถูกต้อง */
+.ovw-table-panel .table-wrap{overflow:visible}
+.ovw-table-panel .panel-heading{position:sticky;top:0;z-index:3;background:#fff}
+.ovw-table-panel thead th{position:sticky;top:56px;z-index:2;box-shadow:0 1px 0 var(--line)}
 .ovw-type{display:inline-block;padding:3px 9px;border-radius:3px;font-size:9.5px;font-weight:900;letter-spacing:.03em}
 .ovw-type-MO{background:#e3edf5;color:var(--blue)}
 .ovw-type-SO{background:#f2ebf6;color:var(--purple)}

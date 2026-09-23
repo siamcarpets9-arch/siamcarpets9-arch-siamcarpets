@@ -285,6 +285,8 @@
       if (potRow && e.target.name === "yarnReady") {
         const rec = loadIssues()[state.designId];
         rec.pots[potRow.dataset.pot].yarnReady = e.target.checked;
+        // บันทึกเวลาที่ย้อมเสร็จ/รับไหมย้อมแล้วจริง ๆ ไว้ด้วย ใช้คำนวณ KPI "ย้อมได้กี่สีต่อวัน" ในหน้าภาพรวมการผลิต
+        if (e.target.checked) rec.pots[potRow.dataset.pot].readyAt = new Date().toISOString();
         saveIssue(state.designId, rec);
         renderAll();
         return;

@@ -276,6 +276,7 @@
         ${has(c.description) ? `<div>${esc(c.description)}</div>` : ""}
         ${sizeLine}
         ${line ? `<div>M/O ${esc(line.no)}</div>` : ""}
+        ${line && has(line.project) ? `<div>PROJECT: ${esc(line.project)}</div>` : ""}
         <div class="shp-label-inv">*INVOICE ${esc(ship.invoiceNo || "-")}*</div>
       </div></div>`;
     }).join("");

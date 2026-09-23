@@ -636,14 +636,54 @@
      Excel Import — จับคู่ M/O กับ SalesEngine เพื่อหา designId
      รองรับตารางแบบแถวเดียวต่อวัน/จอ (เหมือนชีตสรุปรายเดือน) คอลัมน์ตามที่ export ไว้ หรือไฟล์รายงานต้นฉบับ (ชีต SEP)
      ============================================================ */
+  // M/O ในรายงานการผลิตรายวัน (เช่น "148/26", "TH128/26") มักไม่มีเลข 0 นำหน้าเหมือนในหน้ารายงานขาย
+  // (เช่น "0148/26") และบางเลขในประเทศมี PO ต่อท้าย (เช่น "TH 128/26 CC046/26") — ใช้ normalize key
+  // แบบเดียวกับตอนนำเข้า MASTER PLAN เพื่อจับคู่ให้ตรงข้ามรูปแบบเหล่านี้ได้
+  function normMoKey(raw) {
+    const s = String(raw || "").trim().toUpperCase();
+    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*\/\s*0*(\d+)/);
+    if (!m) return s.replace(/\s+/g, "");
+    const [, prefix, num2, yy] = m;
+    return `${prefix}|${num2}|${yy}`;
+  }
   function findDesignIdByMoNo(moNo) {
     try {
       if (typeof SalesEngine === "undefined" || !SalesEngine.getDocs) return null;
-      const norm = String(moNo || "").trim().toLowerCase();
-      if (!norm) return null;
-      const doc = SalesEngine.getDocs().find((d) => String(d.no || "").trim().toLowerCase() === norm);
+      const key = normMoKey(moNo);
+      if (!key) return null;
+      const doc = SalesEngine.getDocs().find((d) => normMoKey(d.no) === key);
       return doc ? doc.designId : null;
     } catch (e) { return null; }
+  }
+
+  // ถ้า M/O ที่จับคู่ได้ยังไม่มี "แผน" บันทึกไว้ในหน้าใบวางแผนงาน (ปกติจะเกิดกับ M/O ที่นำเข้าจาก
+  // Master Plan/QC Check Sheet โดยตรง ยังไม่เคยผ่านหน้าวางแผนงานในระบบนี้) ให้สร้างแผนพื้นฐานให้อัตโนมัติ
+  // จากพื้นที่รวมของ M/O นั้น (จากหน้ารายงานขาย) พร้อมทำเครื่องหมายผ้าใบพร้อมแล้ว เพื่อให้ข้อมูลที่นำเข้า
+  // ไปแสดงผลในหน้าจอทอ/รายงาน/สรุปได้ทันที ไม่ใช่แค่บันทึกเงียบ ๆ ไว้เฉย ๆ
+  function ensurePlanForImport(designId) {
+    const plans = PE().readJson(PE().KEY_PLANS, {});
+    if (plans[designId] && plans[designId].savedAt) return plans[designId];
+    const doc = moDocOf(designId);
+    const totalAreaSqm = doc && doc.lines ? doc.lines.reduce((t, l) => t + num(l.sqm), 0) : 0;
+    const existing = plans[designId] || {};
+    plans[designId] = {
+      designId, moNo: (doc && doc.no) || existing.moNo || "",
+      totalAreaSqm: totalAreaSqm || existing.totalAreaSqm || 0,
+      areaSource: existing.areaSource || "auto",
+      patternPct: existing.patternPct != null ? existing.patternPct : 50,
+      weaveGradeOverride: existing.weaveGradeOverride || "", punchMethodOverride: existing.punchMethodOverride || "", finishGradeOverride: existing.finishGradeOverride || "",
+      bufferPct: existing.bufferPct != null ? existing.bufferPct : 10, zones: existing.zones || [],
+      weaveWorkers: existing.weaveWorkers || [], punchWorkerNames: existing.punchWorkerNames || [], finishWorkerNames: existing.finishWorkerNames || [], dyeOrders: existing.dyeOrders || {},
+      savedAt: existing.savedAt || new Date().toISOString(),
+      importedFrom: "weave-floor-excel-import",
+    };
+    PE().writeJson(PE().KEY_PLANS, plans);
+    // ทำเครื่องหมายผ้าใบพร้อมแล้ว — เพราะถ้ามีข้อมูลกำลังทอบันทึกอยู่จริง แสดงว่าผ้าใบต้องพร้อมไปแล้ว
+    const issues = readJson(WE().KEY_ISSUES, {});
+    if (!issues[designId]) issues[designId] = { pots: {}, lines: {}, canvasReady: true, issuedAt: new Date().toISOString(), usage: [] };
+    else if (!issues[designId].canvasReady) issues[designId].canvasReady = true;
+    writeJson(WE().KEY_ISSUES, issues);
+    return plans[designId];
   }
 
   async function importExcel(file) {
@@ -664,14 +704,14 @@
         if (!iso) { skippedNoDate++; return; }
         const designId = findDesignIdByMoNo(moNo);
         if (!designId) { skippedNoMatch++; unmatched.add(String(moNo)); return; }
-        const plan = planFor(designId);
-        if (!plan) { skippedNoMatch++; unmatched.add(String(moNo)); return; }
+        const plan = ensurePlanForImport(designId); // สร้างแผนพื้นฐานอัตโนมัติถ้ายังไม่เคยวางแผนไว้ในระบบนี้
         const dfloor = ensureDesignFloor(designId);
         const lines = linesOf(designId, plan);
         let lineIdx = lines.findIndex((l) => (l.location || "").trim() === String(row[5] || "").trim());
         if (lineIdx < 0) lineIdx = 0;
         const piece = ensurePieceRec(dfloor, lineIdx);
         if (!piece.loomNo && has(row[1])) piece.loomNo = String(row[1]);
+        if (!piece.gradeOverride && has(row[4])) piece.gradeOverride = String(row[4]).trim(); // เกรดจริงจากรายงาน (คอลัมน์ E)
         const day = ensureDayRec(piece, iso);
         // คอลัมน์ตามฟอร์แมต SEP: 8=คงเหลือยกมา(ปกติ) 9=พ.ท.ทำได้ 11=จำนวนพนักงาน 12=เริ่ม 13=เลิก 17=รายชื่อ ; OT: 18.. 27=รายชื่อ
         if (has(row[9])) day.normal.doneSqm = num(row[9]);
@@ -954,6 +994,34 @@
   window.renderWeaveFloor = renderWeaveFloor;
 
   /* ============================================================
+     Store — ส่วนรับสินค้าสำเร็จรูป: M/O · S/O ที่ "เสร็จแล้ว" ทุกตัว (ใช้ตรรกะเดียวกับหน้าภาพรวมการผลิต)
+     ============================================================ */
+  function storeReceivingHtml() {
+    const OE = window.OverviewEngine;
+    if (!OE) return "";
+    const rows = OE.jobs()
+      .map((d) => ({ d, st: OE.statusOf(d), type: OE.typeOf(d) }))
+      .filter((r) => r.st.dept === "done")
+      .sort((a, b) => (b.st.updatedAt || "").localeCompare(a.st.updatedAt || ""));
+    const shipped = rows.filter((r) => r.st.state === "done").length;
+    const waiting = rows.length - shipped;
+    return `
+    <section class="department-panel pw-card wide" style="margin-bottom:14px">
+      <div class="panel-heading"><div><strong>Store — ส่วนรับสินค้าสำเร็จรูป</strong><small>M/O · S/O ที่ทอ/ตกแต่ง/QC ผ่านครบแล้วทุกตัว จะย้ายมาอยู่ที่นี่โดยอัตโนมัติ (ตรรกะเดียวกับหน้าภาพรวมการผลิต)</small></div></div>
+      <div class="pw-body">
+        <div class="pw-res-row">${res("รับเข้า Store แล้วทั้งหมด", `${rows.length} รายการ`, "main")}${res("รอนำส่ง", `${waiting} รายการ`)}${res("จัดส่งแล้ว", `${shipped} รายการ`)}</div>
+        ${rows.length ? `<div class="table-wrap"><table class="calc-table"><thead><tr><th>ประเภท</th><th>เลขที่</th><th>ลูกค้า</th><th>Project / PO</th><th>สถานะ</th></tr></thead><tbody>${rows.map((r) => `<tr>
+          <td><span class="ovw-type ovw-type-${r.type}">${r.type}</span></td>
+          <td><strong>${esc(r.d.id)}</strong><small>${esc(r.d.moNo || "")}</small></td>
+          <td>${esc(r.d.customer || "-")}</td>
+          <td>${esc(r.d.project || "-")}</td>
+          <td><span class="status-tag ${r.st.state === "done" ? "" : "review"}">${esc(r.st.stateLabel)}</span></td>
+        </tr>`).join("")}</tbody></table></div>` : `<p class="col-empty">ยังไม่มี M/O · S/O ที่เสร็จครบทุกแผนกแล้ว</p>`}
+      </div>
+    </section>`;
+  }
+
+  /* ============================================================
      QC Dashboard — หน้ารายงาน QC รวมทุกจอ
      ============================================================ */
   function qcDashboardHtml() {
@@ -964,6 +1032,7 @@
     <section class="page-heading">
       <div><p class="eyebrow">QC DASHBOARD</p><h1>รายงาน QC ทุกแผนก</h1><p class="subtitle">รวมผลตรวจ QC ของแผนกทอ (ต่อจอ) และแผนกทากาวตกแต่ง (ต่อชิ้น) ทุก M/O — บันทึกได้จากแท็บ “บันทึกประจำวัน” ในหน้าแผนกทอ และจากหน้าแผนกทากาวตกแต่ง</p></div>
     </section>
+    ${storeReceivingHtml()}
     <div class="summary-cards workflow-cards">
       <div class="summary-card"><small>ตรวจทั้งหมด</small><strong>${total}</strong><span>รายการ</span></div>
       <div class="summary-card"><small>ผ่าน</small><strong>${pass}</strong><span>${total ? fmt(pass / total * 100, 0) : 0}%</span></div>

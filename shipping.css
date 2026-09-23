@@ -56,13 +56,14 @@
 .shp-doc-table td{padding:6px;border:1px solid #d6dedd;font-size:10.5px}
 .shp-pack-note{color:#b3413a;font-weight:900;font-size:11px}
 
-/* หนึ่งม้วน/กล่อง = หนึ่งแผ่นเต็ม A4 แนวนอน แยกกันคนละหน้ากระดาษ (ไม่รวมกันหลายป้ายในแผ่นเดียว) */
-.shp-label-page{width:297mm;min-height:210mm;background:#fff;box-shadow:0 6px 24px #0007;box-sizing:border-box;padding:20mm;margin:0 auto 16px;display:flex;align-items:center;justify-content:center}
-.shp-label{width:100%;max-width:170mm;border:2px solid #111;padding:14mm;background:#fff;font-size:15px;line-height:1.7}
-.shp-label-top{display:flex;justify-content:space-between;font-weight:900;font-size:18px;border-bottom:1px solid #111;padding-bottom:8px;margin-bottom:10px}
-.shp-label-consignee{font-weight:700;margin-bottom:10px;font-size:16px}
-.shp-label-no{font-weight:900;font-size:30px;margin:8px 0}
-.shp-label-inv{font-weight:900;text-align:center;margin-top:12px;font-size:18px}
+/* หนึ่งม้วน/กล่อง = หนึ่งแผ่นเต็ม A4 แนวนอน แยกกันคนละหน้ากระดาษ (ไม่รวมกันหลายป้ายในแผ่นเดียว)
+   ตัวป้ายขยายเต็มพื้นที่หน้ากระดาษ (เว้นระยะขอบกระดาษน้อยที่สุด) ไม่ใช่กล่องเล็กลอยกลางหน้าอีกต่อไป */
+.shp-label-page{width:297mm;min-height:210mm;background:#fff;box-shadow:0 6px 24px #0007;box-sizing:border-box;padding:8mm;margin:0 auto 16px;display:flex}
+.shp-label{width:100%;height:100%;border:3px solid #111;padding:16mm 22mm;background:#fff;font-size:22px;line-height:1.9;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center}
+.shp-label-top{display:flex;justify-content:space-between;font-weight:900;font-size:26px;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:16px}
+.shp-label-consignee{font-weight:700;margin-bottom:14px;font-size:23px}
+.shp-label-no{font-weight:900;font-size:44px;margin:12px 0}
+.shp-label-inv{font-weight:900;text-align:center;margin-top:18px;font-size:26px}
 
 @page{size:A4 landscape;margin:0}
 @media print{
