@@ -285,6 +285,11 @@
       if (type === "SO") soCount++; else moCount++;
     });
     const total = rows.length;
+    // นับเฉพาะงานที่ยังไม่เสร็จ (ไม่รวม dept "done") ไว้ใช้กับตัวกรอง M/O·S/O ของตารางด้านล่าง
+    // เพราะตารางนั้นตัดงานที่เสร็จ/จัดส่งแล้วออกไปให้ดูที่หน้า Store แทน
+    const activeTotal = total - storeCount - shippedCount;
+    let activeMoCount = 0, activeSoCount = 0;
+    rows.forEach(({ st, type }) => { if (st.dept !== "done") { if (type === "SO") activeSoCount++; else activeMoCount++; } });
 
     const todayIso = new Date().toISOString().slice(0, 10);
     const dayStats = productionDayStats(rows, todayIso);
@@ -293,7 +298,10 @@
     const query =(document.getElementById("ovwSearch") ? document.getElementById("ovwSearch").value : "").trim().toLowerCase();
     const deptFilter = host.dataset.deptFilter || "all";
     const typeFilter = host.dataset.typeFilter || "all";
+    /* งานที่เสร็จ/จัดส่งแล้ว (dept "done") ตัดออกจากรายการหน้าแรกเสมอ — ให้ไปโชว์ที่หน้า
+       QC Dashboard → Store เท่านั้น หน้าภาพรวมการผลิตนี้จึงเหลือแต่งานที่ยังต้องติดตาม/ทำต่อจริง ๆ */
     const filtered = rows.filter(({ d, st, type }) => {
+      if (st.dept === "done") return false;
       if (deptFilter !== "all" && st.dept !== deptFilter) return false;
       if (typeFilter !== "all" && type !== typeFilter) return false;
       if (!query) return true;
@@ -305,10 +313,12 @@
       const n = counts[key] || 0;
       const pct = total ? Math.round((n / total) * 100) : 0;
       const activeClass = deptFilter === key ? "is-active" : "";
-      return `<button type="button" class="ovw-stage ${activeClass}" style="--c:${meta.color}" data-dept="${key}">
+      const isDone = key === "done";
+      // งาน "Store" (เสร็จ/จัดส่งแล้ว) ไม่มีอยู่ในตารางหน้านี้แล้ว — คลิกแล้วพาไปหน้า QC Dashboard → Store แทนการกรองตารางเปล่า
+      return `<button type="button" class="ovw-stage ${activeClass}" style="--c:${meta.color}" data-dept="${key}" ${isDone ? 'data-goto-store="1"' : ""}>
         <span class="ovw-stage-dot"></span>
         <strong>${n}</strong>
-        <small>${esc(meta.short)}</small>
+        <small>${esc(meta.short)}${isDone ? " ↗" : ""}</small>
         <i style="width:${pct}%"></i>
       </button>`;
     }).join("");
@@ -375,11 +385,11 @@
 
       <section class="department-panel ovw-table-panel">
         <div class="panel-heading">
-          <div><strong>รายการงานทั้งหมด</strong><small>คลิกแผนกด้านบนเพื่อกรอง หรือค้นหาด้วยเลข M/O · SO, ลูกค้า, Project</small></div>
+          <div><strong>รายการงานที่ยังไม่เสร็จ</strong><small>คลิกแผนกด้านบนเพื่อกรอง หรือค้นหาด้วยเลข M/O · SO, ลูกค้า, Project — งานที่เสร็จ/จัดส่งแล้วทั้งหมดย้ายไปอยู่หน้า <u>QC Dashboard → Store</u> เท่านั้น</small></div>
           <div class="segmented ovw-typefilter">
-            <button type="button" class="view-btn ${typeFilter === "all" ? "active" : ""}" data-type="all">ทั้งหมด (${total})</button>
-            <button type="button" class="view-btn ${typeFilter === "MO" ? "active" : ""}" data-type="MO">M/O (${moCount})</button>
-            <button type="button" class="view-btn ${typeFilter === "SO" ? "active" : ""}" data-type="SO">S/O (${soCount})</button>
+            <button type="button" class="view-btn ${typeFilter === "all" ? "active" : ""}" data-type="all">ทั้งหมด (${activeTotal})</button>
+            <button type="button" class="view-btn ${typeFilter === "MO" ? "active" : ""}" data-type="MO">M/O (${activeMoCount})</button>
+            <button type="button" class="view-btn ${typeFilter === "SO" ? "active" : ""}" data-type="SO">S/O (${activeSoCount})</button>
           </div>
           <label>ค้นหา<input id="ovwSearch" type="text" placeholder="เช่น MO-0109-26, ART RUGS" value="${esc(query)}"></label>
         </div>
@@ -400,6 +410,7 @@
     }
     host.querySelectorAll(".ovw-stage").forEach((btn) => {
       btn.addEventListener("click", () => {
+        if (btn.dataset.gotoStore) { if (typeof setView === "function") setView("qcdash"); return; }
         host.dataset.deptFilter = host.dataset.deptFilter === btn.dataset.dept ? "all" : btn.dataset.dept;
         renderOverview();
       });

@@ -1006,7 +1006,7 @@
     const shipped = rows.filter((r) => r.st.state === "done").length;
     const waiting = rows.length - shipped;
     return `
-    <section class="department-panel pw-card wide" style="margin-bottom:14px">
+    <section class="department-panel pw-card wide qc-sticky-panel" style="margin-bottom:14px">
       <div class="panel-heading"><div><strong>Store — ส่วนรับสินค้าสำเร็จรูป</strong><small>M/O · S/O ที่ทอ/ตกแต่ง/QC ผ่านครบแล้วทุกตัว จะย้ายมาอยู่ที่นี่โดยอัตโนมัติ (ตรรกะเดียวกับหน้าภาพรวมการผลิต)</small></div></div>
       <div class="pw-body">
         <div class="pw-res-row">${res("รับเข้า Store แล้วทั้งหมด", `${rows.length} รายการ`, "main")}${res("รอนำส่ง", `${waiting} รายการ`)}${res("จัดส่งแล้ว", `${shipped} รายการ`)}</div>
@@ -1039,7 +1039,7 @@
       <div class="summary-card"><small>ไม่ผ่าน</small><strong>${fail}</strong><span>${total ? fmt(fail / total * 100, 0) : 0}%</span></div>
       <div class="summary-card"><small>มีข้อสังเกต</small><strong>${note}</strong><span>${total ? fmt(note / total * 100, 0) : 0}%</span></div>
     </div>
-    <section class="department-panel pw-card wide">
+    <section class="department-panel pw-card wide qc-sticky-panel">
       <div class="panel-heading"><div><strong>ประวัติการตรวจ QC ทั้งหมด</strong></div></div>
       <div class="pw-body">
         ${list.length ? `<table class="calc-table"><thead><tr><th>วันที่ตรวจ</th><th>แผนก</th><th>M/O (Design)</th><th>จอ/ชิ้น</th><th>ผู้ตรวจ</th><th>ผล</th><th>รายละเอียด</th></tr></thead><tbody>${list.map((q) => {
@@ -1049,6 +1049,19 @@
       </div>
     </section>`;
   }
-  function renderQcDashboard() { $("#qcdashView").innerHTML = qcDashboardHtml(); }
+  function renderQcDashboard() {
+    const host = $("#qcdashView");
+    host.innerHTML = qcDashboardHtml();
+    // ตรึงหัวการ์ด (panel-heading) และหัวคอลัมน์ตาราง (thead) ของแต่ละส่วน (Store, ประวัติ QC) ไว้ด้านบน
+    // ขณะเลื่อนหน้าลง/ขึ้น เหมือนกับหน้าภาพรวมการผลิต — ส่วนเนื้อหาด้านล่างเลื่อนได้ตามปกติ
+    host.querySelectorAll(".qc-sticky-panel").forEach((panel) => {
+      const heading = panel.querySelector(".panel-heading");
+      const theadCells = panel.querySelectorAll("thead th");
+      if (heading && theadCells.length) {
+        const top = `${heading.offsetHeight}px`;
+        theadCells.forEach((th) => { th.style.top = top; });
+      }
+    });
+  }
   window.renderQcDashboard = renderQcDashboard;
 })();
