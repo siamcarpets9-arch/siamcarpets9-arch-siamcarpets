@@ -48,6 +48,74 @@
 
   function loadFinishAll() { return readJson(KEY_FINISH, {}); }
   function saveFinishAll(all) { writeJson(KEY_FINISH, all); }
+
+  const KEY_WORKERS_SHARED = "siam-workforce"; // ทะเบียนพนักงานทอ/ตกแต่ง (ใช้ร่วมกับแผนกทอ)
+  function loadFinWorkers() { const w = readJson(KEY_WORKERS_SHARED, null); return Array.isArray(w) ? w : []; }
+  function saveFinWorkers(list) { writeJson(KEY_WORKERS_SHARED, list); }
+  function addFinWorker(name) {
+    name = String(name || "").trim();
+    if (!name) return;
+    const list = loadFinWorkers();
+    if (list.some((w) => w.toLowerCase() === name.toLowerCase())) { toast(`มีชื่อ "${name}" อยู่แล้ว`); return; }
+    list.push(name);
+    saveFinWorkers(list);
+  }
+  function removeFinWorker(idx) {
+    const list = loadFinWorkers();
+    list.splice(idx, 1);
+    saveFinWorkers(list);
+  }
+  function exportFinWorkersExcel() {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const rows = [["แผนก", "ชื่อ-นามสกุล"], ...loadFinWorkers().map((w) => ["ทอ/ตกแต่ง", w])];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "พนักงานทอ-ตกแต่ง");
+    XLSX.writeFile(wb, "รายชื่อพนักงาน-ทอ-ตกแต่ง.xlsx");
+  }
+  const KEY_PATTERN_WORKERS_EXT = "siam-workforce-pattern"; // ทะเบียนเจาะลาย/ปั๊มผ้า — ไฟล์นำเข้าเดียวแยกลงได้ทั้ง 2 ทะเบียนไม่ว่าจะอัปโหลดจากหน้าไหน
+  async function importFinWorkersExcel(file) {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const sharedList = loadFinWorkers();
+    const patternList = readJson(KEY_PATTERN_WORKERS_EXT, []);
+    let sharedAdded = 0, patternAdded = 0;
+    wb.SheetNames.forEach((sn) => {
+      XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "", raw: false }).forEach((row) => {
+        const dept = String(row[0] || "").trim();
+        const name = String(row[1] || "").trim();
+        if (!name || /ชื่อ.?นามสกุล|ตัวอย่าง/.test(name)) return;
+        const isShared = /ทอ|ตกแต่ง|แต่ง/.test(dept);
+        const isPattern = /เจาะลาย|ขยายลาย|ปั๊ม|ดีไซน์/.test(dept);
+        // ไม่ระบุแผนก = ถือว่าเป็นแผนกของหน้านี้ (ทอ/ตกแต่ง)
+        if (isShared || (!dept && !isPattern)) {
+          if (!sharedList.some((w) => w.toLowerCase() === name.toLowerCase())) { sharedList.push(name); sharedAdded++; }
+        }
+        if (isPattern) {
+          if (!patternList.some((w) => w.toLowerCase() === name.toLowerCase())) { patternList.push(name); patternAdded++; }
+        }
+      });
+    });
+    saveFinWorkers(sharedList);
+    writeJson(KEY_PATTERN_WORKERS_EXT, patternList);
+    toast(`นำเข้ารายชื่อพนักงานแล้ว — ทอ/ตกแต่ง ${sharedAdded} คน, เจาะลาย/ปั๊มผ้า ${patternAdded} คน`);
+  }
+  function finRosterHtml() {
+    const workers = loadFinWorkers();
+    return `<section class="department-panel pw-card">
+      <div class="panel-heading"><div><strong>รายชื่อพนักงานทอ/ตกแต่ง</strong><small>เพิ่ม/ลบรายชื่อได้ที่นี่ — ใช้ร่วมกันทั้งแผนกทอและแผนกตกแต่ง</small></div></div>
+      <div class="pw-body">
+        <div class="pw-row">
+          ${field("ชื่อพนักงาน", `<input id="finNewWorkerName" placeholder="พิมพ์ชื่อแล้วกดเพิ่มรายชื่อ">`)}
+          <button type="button" class="action-button primary" data-add-finworker>+ เพิ่มรายชื่อ</button>
+          <button type="button" class="action-button" data-export-finworkers>ส่งออก Excel</button>
+          <label class="file-picker">นำเข้าจาก Excel<input type="file" id="finWorkersImportFile" accept=".xlsx,.xls" data-import-finworkers></label>
+        </div>
+        ${workers.length
+          ? `<div class="pw-worker-tags">${workers.map((w, i) => `<span>${esc(w)}<button type="button" class="pw-worker-x" data-remove-finworker="${i}" title="ลบรายชื่อนี้">×</button></span>`).join("")}</div>`
+          : `<p class="col-empty">ยังไม่มีรายชื่อพนักงาน — เพิ่มด้านบน</p>`}
+      </div>
+    </section>`;
+  }
   function ensureDesignFinish(designId) {
     const all = loadFinishAll();
     if (!all[designId]) all[designId] = { pieces: {} };
@@ -207,7 +275,7 @@
     if (!ref) return `<p class="col-empty">เลือกชิ้นด้านบนก่อน</p>`;
     const dfin = ensureDesignFinish(state.designId);
     const rec = ensurePieceFinish(dfin, state.lineIdx);
-    const workers = readJson("siam-workforce", []);
+    const workers = loadFinWorkers();
     const finishGrades = PE().FINISH_GRADES || [];
     const suggested = (PE().suggestGrade(finishGrades, ref.plan.patternPct) || {}).grade || "";
     const isSquareVal = rec.dry.isSquare;
@@ -359,6 +427,7 @@
         <div><p class="eyebrow">GLUING &amp; FINISHING</p><h1>แผนกทากาวตกแต่ง</h1><p class="subtitle">รับพรมจากแผนกทอ → ทากาว (KPI ปริมาณกาวมาตรฐาน = พื้นที่ × 2) → แห้ง/ตกแต่ง/QC → สรุปต้นทุนรวมต่อ M/O</p></div>
       </section>
       ${tabBar()}
+      <div id="fnRoster"></div>
       <section class="department-panel pw-card">
         <div class="panel-heading"><div><strong>เลือกชิ้นที่โอนจากแผนกทอ</strong></div></div>
         <div class="pw-body" id="fnJobPicker"></div>
@@ -367,6 +436,7 @@
   }
 
   function renderAll() {
+    $("#fnRoster").innerHTML = finRosterHtml();
     const pickerSection = $("#fnJobPicker") ? $("#fnJobPicker").closest("section") : null;
     if (pickerSection) pickerSection.style.display = state.tab === "cost" && !state.designId ? "" : (state.tab === "cost" ? "" : "");
     $("#fnJobPicker").innerHTML = pieceJobPickerHtml();
@@ -389,6 +459,17 @@
     root.addEventListener("click", (e) => {
       const tabBtn = e.target.closest("[data-fntab]");
       if (tabBtn) { state.tab = tabBtn.dataset.fntab; renderAll(); return; }
+      const addFw = e.target.closest("[data-add-finworker]");
+      if (addFw) {
+        const input = $("#finNewWorkerName");
+        const name = input ? input.value : "";
+        if (has(name)) { addFinWorker(name); renderAll(); const again = $("#finNewWorkerName"); if (again) again.focus(); }
+        return;
+      }
+      const rmFw = e.target.closest("[data-remove-finworker]");
+      if (rmFw) { removeFinWorker(Number(rmFw.dataset.removeFinworker)); renderAll(); return; }
+      const expFw = e.target.closest("[data-export-finworkers]");
+      if (expFw) { exportFinWorkersExcel(); return; }
       const pick = e.target.closest("[data-fnpick-design]");
       if (pick) { state.designId = pick.dataset.fnpickDesign; state.lineIdx = pick.dataset.fnpickLine; renderAll(); return; }
 
@@ -446,6 +527,11 @@
     });
 
     root.addEventListener("change", (e) => {
+      if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-finworkers")) {
+        const file = e.target.files && e.target.files[0];
+        if (file) importFinWorkersExcel(file).then(() => { renderAll(); e.target.value = ""; });
+        return;
+      }
       const ff = e.target.closest("[data-ff]");
       if (ff) {
         const dfin = ensureDesignFinish(state.designId);
@@ -538,6 +624,15 @@
         rec.extraCosts[Number(extraRow.dataset.extracost)][e.target.name] = e.target.value;
         saveDesignFinish(state.designId, dfin);
         return;
+      }
+    });
+    root.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.target && e.target.id === "finNewWorkerName") {
+        e.preventDefault();
+        addFinWorker(e.target.value);
+        renderAll();
+        const again = $("#finNewWorkerName");
+        if (again) again.focus();
       }
     });
   }

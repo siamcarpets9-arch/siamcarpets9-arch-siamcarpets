@@ -102,11 +102,86 @@
   }
   function issueRecOf(designId) { return readJson(WE().KEY_ISSUES, {})[designId] || null; }
   function loadWeaveWorkers() { const w = readJson(KEY_WORKERS_SHARED, null); return Array.isArray(w) ? w : []; }
+  function saveWeaveWorkers(list) { writeJson(KEY_WORKERS_SHARED, list); }
+  function addWeaveWorker(name) {
+    name = String(name || "").trim();
+    if (!name) return;
+    const list = loadWeaveWorkers();
+    if (list.some((w) => w.toLowerCase() === name.toLowerCase())) { toast(`มีชื่อ "${name}" อยู่แล้ว`); return; }
+    list.push(name);
+    saveWeaveWorkers(list);
+  }
+  function removeWeaveWorker(idx) {
+    const list = loadWeaveWorkers();
+    list.splice(idx, 1);
+    saveWeaveWorkers(list);
+  }
+  function exportWeaveWorkersExcel() {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const rows = [["แผนก", "ชื่อ-นามสกุล"], ...loadWeaveWorkers().map((w) => ["ทอ/ตกแต่ง", w])];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "พนักงานทอ-ตกแต่ง");
+    XLSX.writeFile(wb, "รายชื่อพนักงาน-ทอ-ตกแต่ง.xlsx");
+  }
+  const KEY_PATTERN_WORKERS_EXT = "siam-workforce-pattern"; // ทะเบียนเจาะลาย/ปั๊มผ้า — ไฟล์นำเข้าเดียวแยกลงได้ทั้ง 2 ทะเบียนไม่ว่าจะอัปโหลดจากหน้าไหน
+  async function importWeaveWorkersExcel(file) {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const sharedList = loadWeaveWorkers();
+    const patternList = readJson(KEY_PATTERN_WORKERS_EXT, []);
+    let sharedAdded = 0, patternAdded = 0;
+    wb.SheetNames.forEach((sn) => {
+      XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "", raw: false }).forEach((row) => {
+        const dept = String(row[0] || "").trim();
+        const name = String(row[1] || "").trim();
+        if (!name || /ชื่อ.?นามสกุล|ตัวอย่าง/.test(name)) return;
+        const isShared = /ทอ|ตกแต่ง|แต่ง/.test(dept);
+        const isPattern = /เจาะลาย|ขยายลาย|ปั๊ม|ดีไซน์/.test(dept);
+        // ไม่ระบุแผนก = ถือว่าเป็นแผนกของหน้านี้ (ทอ/ตกแต่ง)
+        if (isShared || (!dept && !isPattern)) {
+          if (!sharedList.some((w) => w.toLowerCase() === name.toLowerCase())) { sharedList.push(name); sharedAdded++; }
+        }
+        if (isPattern) {
+          if (!patternList.some((w) => w.toLowerCase() === name.toLowerCase())) { patternList.push(name); patternAdded++; }
+        }
+      });
+    });
+    saveWeaveWorkers(sharedList);
+    writeJson(KEY_PATTERN_WORKERS_EXT, patternList);
+    toast(`นำเข้ารายชื่อพนักงานแล้ว — ทอ/ตกแต่ง ${sharedAdded} คน, เจาะลาย/ปั๊มผ้า ${patternAdded} คน`);
+  }
+  function sharedRosterHtml() {
+    const workers = loadWeaveWorkers();
+    return `<section class="department-panel pw-card">
+      <div class="panel-heading"><div><strong>รายชื่อพนักงานทอ/ตกแต่ง</strong><small>เพิ่ม/ลบรายชื่อได้ที่นี่ — ใช้ร่วมกันทั้งแผนกทอและแผนกตกแต่ง</small></div></div>
+      <div class="pw-body">
+        <div class="pw-row">
+          ${field("ชื่อพนักงาน", `<input id="wfNewWorkerName" placeholder="พิมพ์ชื่อแล้วกดเพิ่มรายชื่อ">`)}
+          <button type="button" class="action-button primary" data-add-weaver>+ เพิ่มรายชื่อ</button>
+          <button type="button" class="action-button" data-export-weavers>ส่งออก Excel</button>
+          <label class="file-picker">นำเข้าจาก Excel<input type="file" id="wfWorkersImportFile" accept=".xlsx,.xls" data-import-weavers></label>
+        </div>
+        ${workers.length
+          ? `<div class="pw-worker-tags">${workers.map((w, i) => `<span>${esc(w)}<button type="button" class="pw-worker-x" data-remove-weaver="${i}" title="ลบรายชื่อนี้">×</button></span>`).join("")}</div>`
+          : `<p class="col-empty">ยังไม่มีรายชื่อพนักงาน — เพิ่มด้านบน</p>`}
+      </div>
+    </section>`;
+  }
   function linesOf(designId, plan) {
     const doc = moDocOf(designId);
     return (doc && doc.lines && doc.lines.length) ? doc.lines : [{ location: (designs.find((d) => d.id === designId) || {}).project || designId, sqm: plan ? plan.totalAreaSqm : 0 }];
   }
   function suggestedGradeFor(plan) { return plan.weaveGradeOverride ? plan.weaveGradeOverride : ((PE().suggestGrade(PE().WEAVE_GRADES, plan.patternPct) || {}).grade || ""); }
+  /* M/O vs S/O — ใช้ type จากเอกสารฝ่ายขายเป็นหลัก เหมือนหน้าภาพรวมการผลิต (overview.js) */
+  function typeOfDesign(designId) {
+    try {
+      if (typeof SalesEngine !== "undefined" && SalesEngine.getDocs) {
+        const doc = SalesEngine.getDocs().find((x) => x.designId === designId);
+        if (doc && doc.type) return doc.type === "SO" ? "SO" : "MO";
+      }
+    } catch (e) { /* ไม่มี SalesEngine */ }
+    return /^SO/i.test(designId) ? "SO" : "MO";
+  }
 
   /* ============================================================
      M/O ที่พร้อมขึ้นทอ — เกต: มีแผนบันทึกแล้ว + ผ้าใบพร้อม (canvasReady จากขั้น "ส่งแผนกทอ")
@@ -391,22 +466,62 @@
     const refs = allPieceRefs();
     if (!refs.length) return `<p class="col-empty">ยังไม่มีจอทอที่ตั้งค่าไว้ — ไปที่แท็บ “ตั้งค่าขึ้นทอ” ก่อน</p>`;
     const byLoom = [...refs].sort((a, b) => String(a.piece.loomNo || "999").localeCompare(String(b.piece.loomNo || "999"), "th", { numeric: true }));
-    return `<div class="pw-job-grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">${byLoom.map((r) => {
+    const grades = PE().WEAVE_GRADES || [];
+    const designsList = typeof designs !== "undefined" ? designs : [];
+    return `<div class="wfb-grid">${byLoom.map((r) => {
+      const design = designsList.find((d) => d.id === r.designId) || {};
+      const type = typeOfDesign(r.designId);
+      const market = design.market === "DOMESTIC" ? "ในประเทศ" : design.market === "FOREIGN" ? "ต่างประเทศ" : "-";
       const dates = sortedDates(r.piece);
+      const workedDates = dates.filter((d) => { const day = r.piece.days[d]; return num(day.normal.doneSqm) > 0 || num(day.ot.doneSqm) > 0; });
       const lastIso = dates[dates.length - 1];
-      const lastDay = lastIso ? r.piece.days[lastIso] : null;
       const done = pieceDoneTotal(r.piece), remain = Math.max(0, r.totalArea - done);
-      const workersToday = lastDay ? new Set([...(lastDay.normal.workers || []), ...(lastDay.ot.workers || [])]) : new Set();
-      return `<div class="department-panel pw-card" style="margin-bottom:0">
-        <div class="pw-body">
-          <div class="pw-row"><div class="pr main"><small>จอที่</small><strong>${esc(r.piece.loomNo || "ยังไม่ระบุ")}</strong></div>${res("M/O", esc(r.plan.moNo || r.designId))}${res("เกรด", esc(r.grade))}</div>
-          ${r.piece.patternImage ? `<img src="${r.piece.patternImage}" style="max-width:100%;max-height:110px;border:1px solid var(--line);margin:4px 0">` : ""}
-          <div class="pw-row">${res("ชิ้น", esc(r.line.location || "-"))}${res("คงเหลือ", `${fmt(remain, 2)} ตร.ม.`, remain <= 0.0005 ? "main" : "")}</div>
-          <div class="pw-row">${res("บันทึกล่าสุด", lastIso ? thaiDate(lastIso) : "ยังไม่บันทึก")}${res("คนทอล่าสุด", `${workersToday.size} คน`)}</div>
-          <div class="pw-save-bar">
-            <button type="button" class="action-button primary" data-transfer-glue="${esc(r.designId)}" data-transfer-line="${esc(r.lineIdx)}" ${remain > 0.0005 ? "disabled" : ""}>โอนให้แผนกทากาวตกแต่ง</button>
-            ${r.piece.transferredToGlueAt ? `<small>โอนแล้ว ${new Date(r.piece.transferredToGlueAt).toLocaleString("th-TH")}</small>` : `<small>${remain > 0.0005 ? "ทอยังไม่เสร็จ" : "ยังไม่โอน"}</small>`}
+      const donePct = r.totalArea > 0 ? Math.min(100, (done / r.totalArea) * 100) : 0;
+
+      let totalMh = 0;
+      const allWeavers = new Set();
+      dates.forEach((d) => {
+        const day = r.piece.days[d];
+        totalMh += shiftManHours(day.normal) + shiftManHours(day.ot);
+        (day.normal.workers || []).forEach((w) => allWeavers.add(w));
+        (day.ot.workers || []).forEach((w) => allWeavers.add(w));
+      });
+      const actualEff = totalMh > 0 ? done / totalMh : 0;
+      const gradeInfo = grades.find((g) => g.grade === r.grade);
+      const pctVsGrade = gradeInfo && gradeInfo.rateSqmPerHr > 0 ? (actualEff / gradeInfo.rateSqmPerHr) * 100 : null;
+
+      return `<div class="wfb-card">
+        <div class="wfb-head">
+          <div class="wfb-loom"><small>จอที่</small><strong>${esc(r.piece.loomNo || "?")}</strong></div>
+          <div class="wfb-headinfo">
+            <div class="wfb-badges">
+              <span class="ovw-type ovw-type-${type}">${type}</span>
+              <span class="wfb-market">${esc(market)}</span>
+              <strong>${esc(r.plan.moNo || r.designId)}</strong>
+            </div>
+            <div class="wfb-cust">${esc(design.customer || "-")}</div>
+            <small class="wfb-due">กำหนดส่ง: ${esc(design.due || "-")} · ${esc(r.line.location || "-")}</small>
           </div>
+          <button type="button" class="wfb-edit" data-goto-daily="${esc(r.designId)}" data-goto-line="${esc(r.lineIdx)}" title="ไปที่บันทึกประจำวันของจอนี้">✎</button>
+        </div>
+        ${r.piece.patternImage ? `<img class="wfb-img" src="${r.piece.patternImage}" alt="แบบพรม">` : `<div class="wfb-img wfb-img-empty">ยังไม่แนบรูปแบบ (แนบได้ที่แท็บ “ตั้งค่าขึ้นทอ”)</div>`}
+        <div class="wfb-weavers"><small>คนทอ</small><span>${allWeavers.size ? [...allWeavers].map((w) => esc(w)).join(", ") : "ยังไม่มีบันทึก"}</span></div>
+        <div class="wfb-stats">
+          <div class="wfb-stat main"><small>เกรด</small><strong>${esc(r.grade || "-")}</strong></div>
+          <div class="wfb-stat${pctVsGrade != null && pctVsGrade < 90 ? " warn" : ""}"><small>% เทียบเกรด (มาตรฐาน)</small><strong>${pctVsGrade != null ? fmt(pctVsGrade, 1) + "%" : "-"}</strong></div>
+          <div class="wfb-stat"><small>ใช้เวลารวม</small><strong>${fmt(totalMh, 1)} ชม.</strong></div>
+          <div class="wfb-stat"><small>จำนวนวันที่ทอ</small><strong>${workedDates.length} วัน</strong></div>
+        </div>
+        <div class="wfb-progress"><div class="wfb-progress-bar" style="width:${donePct}%"></div></div>
+        <div class="wfb-stats">
+          <div class="wfb-stat"><small>ตร.ม. รวม</small><strong>${fmt(r.totalArea, 2)}</strong></div>
+          <div class="wfb-stat"><small>ทอไปแล้ว</small><strong>${fmt(done, 2)}</strong></div>
+          <div class="wfb-stat${remain <= 0.0005 ? " main" : ""}"><small>คงเหลือ</small><strong>${fmt(remain, 2)}</strong></div>
+        </div>
+        <div class="wfb-foot"><small>บันทึกล่าสุด ${lastIso ? thaiDate(lastIso) : "ยังไม่บันทึก"}</small></div>
+        <div class="pw-save-bar">
+          <button type="button" class="action-button primary" data-transfer-glue="${esc(r.designId)}" data-transfer-line="${esc(r.lineIdx)}" ${remain > 0.0005 ? "disabled" : ""}>โอนให้แผนกทากาวตกแต่ง</button>
+          ${r.piece.transferredToGlueAt ? `<small>โอนแล้ว ${new Date(r.piece.transferredToGlueAt).toLocaleString("th-TH")}</small>` : `<small>${remain > 0.0005 ? "ทอยังไม่เสร็จ" : "ยังไม่โอน"}</small>`}
         </div>
       </div>`;
     }).join("")}</div>`;
@@ -606,6 +721,7 @@
         </div>
       </section>
       ${tabBar()}
+      <div id="wfRoster"></div>
       <section class="department-panel pw-card">
         <div class="panel-heading"><div><strong>เลือก M/O</strong><small>ผ้าใบต้องพร้อมก่อน (ติ๊กในหน้า “ส่งแผนกทอ”) — ไหมพร้อมได้ทีละสี</small></div></div>
         <div class="pw-body" id="wfJobPicker"></div>
@@ -614,6 +730,7 @@
   }
 
   function renderAll() {
+    $("#wfRoster").innerHTML = sharedRosterHtml();
     if (state.tab !== "board") $("#wfJobPicker").closest("section").style.display = "";
     else $("#wfJobPicker").closest("section").style.display = "none";
     $("#wfJobPicker").innerHTML = jobPickerHtml("wfpick");
@@ -637,10 +754,28 @@
     root.addEventListener("click", (e) => {
       const tabBtn = e.target.closest("[data-wftab]");
       if (tabBtn) { state.tab = tabBtn.dataset.wftab; if (state.tab !== "daily") state.lineIdx = null; renderAll(); return; }
+      const addWv = e.target.closest("[data-add-weaver]");
+      if (addWv) {
+        const input = $("#wfNewWorkerName");
+        const name = input ? input.value : "";
+        if (has(name)) { addWeaveWorker(name); renderAll(); const again = $("#wfNewWorkerName"); if (again) again.focus(); }
+        return;
+      }
+      const rmWv = e.target.closest("[data-remove-weaver]");
+      if (rmWv) { removeWeaveWorker(Number(rmWv.dataset.removeWeaver)); renderAll(); return; }
+      const expWv = e.target.closest("[data-export-weavers]");
+      if (expWv) { exportWeaveWorkersExcel(); return; }
       const pick = e.target.closest("[data-wfpick]");
       if (pick) { state.designId = pick.dataset.wfpick; state.lineIdx = null; renderAll(); return; }
       const lpick = e.target.closest("[data-lpick]");
       if (lpick) { state.lineIdx = lpick.dataset.lpick; renderAll(); return; }
+      const gotoDaily = e.target.closest("[data-goto-daily]");
+      if (gotoDaily) {
+        state.designId = gotoDaily.dataset.gotoDaily;
+        state.lineIdx = gotoDaily.dataset.gotoLine;
+        state.tab = "daily";
+        renderAll(); return;
+      }
       const clearImg = e.target.closest("[data-pf-clear-image]");
       if (clearImg) {
         const idx = clearImg.closest("[data-piece]").dataset.piece;
@@ -733,6 +868,11 @@
     });
 
     root.addEventListener("change", (e) => {
+      if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-weavers")) {
+        const file = e.target.files && e.target.files[0];
+        if (file) importWeaveWorkersExcel(file).then(() => { renderAll(); e.target.value = ""; });
+        return;
+      }
       const pf = e.target.closest("[data-pf]");
       if (pf) {
         const idx = pf.closest("[data-piece]").dataset.piece;
@@ -798,6 +938,15 @@
         day.gunAdjust[Number(gunRow.dataset.gun)][e.target.name] = e.target.value;
         saveDesignFloor(state.designId, dfloor);
         return;
+      }
+    });
+    root.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.target && e.target.id === "wfNewWorkerName") {
+        e.preventDefault();
+        addWeaveWorker(e.target.value);
+        renderAll();
+        const again = $("#wfNewWorkerName");
+        if (again) again.focus();
       }
     });
   }

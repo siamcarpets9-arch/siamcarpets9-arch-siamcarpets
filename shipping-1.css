@@ -1,0 +1,81 @@
+/* ============================================================
+   ใบส่งสินค้า + Marks & Nos
+   ============================================================ */
+.shp-tight{padding:10px}
+.shp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-bottom:14px}
+.shp-card{border:1px solid var(--line);background:#fff;padding:10px;cursor:pointer;display:grid;gap:6px}
+.shp-card:hover{border-color:var(--teal)}
+.shp-card.active{border-color:var(--teal);box-shadow:inset 0 0 0 1px var(--teal)}
+.shp-card-top{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:var(--ink)}
+.shp-card-top span{font-size:9px;color:var(--muted);font-weight:400}
+.shp-card-mid{font-size:11px;color:var(--muted)}
+.shp-card-bot{display:flex;justify-content:space-between;align-items:center}
+.shp-card-bot small{color:var(--muted);font-size:9px}
+.shp-danger{color:#b3413a!important}
+
+.shp-editor .shp-body{padding:12px 14px;display:grid;gap:10px}
+.shp-head-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px 12px}
+.shp-head-grid .span2{grid-column:1/-1}
+.shp-head-grid label.pf{display:grid;gap:4px;color:var(--muted);font-size:9px;font-weight:900}
+.shp-head-grid input,.shp-head-grid textarea{padding:6px 8px;border:1px solid var(--line);font:inherit;font-size:11px;resize:vertical}
+.shp-editor-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.shp-sub-head{font-size:10px;font-weight:900;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;margin-top:6px;border-top:1px solid var(--line);padding-top:10px}
+.shp-search{width:100%;padding:7px 9px;border:1px solid var(--line);font:inherit;font-size:11px}
+.shp-pick-list{display:grid;gap:4px;max-height:220px;overflow:auto;border:1px solid var(--line);padding:4px}
+.shp-pick-item{display:grid;text-align:left;gap:2px;padding:6px 8px;border:0;background:#fbfcfc;cursor:pointer;font:inherit}
+.shp-pick-item:hover{background:#eef5f4}
+.shp-pick-item b{font-size:11px;color:var(--ink)}
+.shp-pick-item span{font-size:10px;color:var(--muted)}
+.shp-pick-item small{font-size:9px;color:var(--muted)}
+
+.shp-table{width:100%;border-collapse:collapse;min-width:760px}
+.shp-table th{background:#f1f5f4;font-size:9px;padding:6px;text-align:left;white-space:nowrap}
+.shp-table td{padding:4px;border-bottom:1px solid #edf1f0;vertical-align:top;font-size:11px}
+.shp-table td input,.shp-table td select{width:100%;padding:5px 6px;border:1px solid var(--line);font:inherit;font-size:11px}
+.shp-table .shp-roll{text-align:center;font-weight:900;color:var(--teal);white-space:nowrap}
+.shp-line-actions{display:flex;gap:6px;white-space:nowrap}
+
+/* ============ พิมพ์ในแอป (overlay เต็มจอ) ============ */
+#shipPrint{position:fixed;inset:0;z-index:100;background:#3b4a4d;display:flex;flex-direction:column}
+#shipPrint[hidden]{display:none!important}
+.shp-bar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#16363a;color:#fff;flex-wrap:wrap}
+.shp-spacer{flex:1}
+.shp-tip{font-size:9px;color:#9fb8b8}
+.shp-bar button{border:1px solid #ffffff55;background:transparent;color:#fff;padding:7px 14px;font:inherit;font-size:11px;font-weight:900;cursor:pointer}
+.shp-bar button:hover{background:#ffffff22}
+.shp-bar button.primary{background:var(--gold,#d8a83c);border-color:var(--gold,#d8a83c);color:#16363a}
+.shp-print-scroll{flex:1;overflow:auto;padding:18px}
+
+.shp-sheet{width:297mm;min-height:210mm;background:#fff;box-shadow:0 6px 24px #0007;padding:12mm 14mm;box-sizing:border-box;font-size:11px;color:#111;margin:0 auto 16px}
+.shp-doc-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #16363a;padding-bottom:10px;margin-bottom:12px}
+.shp-doc-title{text-align:right;font-weight:900;font-size:14px;line-height:1.4}
+.shp-doc-meta{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:10px;font-size:11px}
+.shp-doc-consignee{margin-bottom:14px;padding:8px 10px;background:#f7f9f8;border:1px solid #e2e8e7}
+.shp-doc-table{width:100%;border-collapse:collapse;margin-bottom:14px}
+.shp-doc-table th{background:#16363a;color:#fff;padding:6px;font-size:10px;text-align:left}
+.shp-doc-table td{padding:6px;border:1px solid #d6dedd;font-size:10.5px}
+.shp-pack-note{color:#b3413a;font-weight:900;font-size:11px}
+
+/* หนึ่งม้วน/กล่อง = หนึ่งแผ่นเต็ม A4 แนวนอน แยกกันคนละหน้ากระดาษ (ไม่รวมกันหลายป้ายในแผ่นเดียว)
+   ตัวป้ายขยายเต็มพื้นที่หน้ากระดาษ (เว้นระยะขอบกระดาษน้อยที่สุด) ไม่ใช่กล่องเล็กลอยกลางหน้าอีกต่อไป */
+.shp-label-page{width:297mm;min-height:210mm;background:#fff;box-shadow:0 6px 24px #0007;box-sizing:border-box;padding:8mm;margin:0 auto 16px;display:flex}
+.shp-label{width:100%;height:100%;border:3px solid #111;padding:16mm 22mm;background:#fff;font-size:22px;line-height:1.9;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center}
+.shp-label-top{display:flex;justify-content:space-between;font-weight:900;font-size:26px;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:16px}
+.shp-label-consignee{font-weight:700;margin-bottom:14px;font-size:23px}
+.shp-label-no{font-weight:900;font-size:44px;margin:12px 0}
+.shp-label-inv{font-weight:900;text-align:center;margin-top:18px;font-size:26px}
+
+@page{size:A4 landscape;margin:0}
+@media print{
+  html,body{background:#fff!important;margin:0!important;padding:0!important;height:auto!important;overflow:visible!important}
+  body.ship-printing>*:not(#shipPrint){display:none!important}
+  #shipPrint{position:static!important;display:block!important;background:#fff!important;inset:auto}
+  .shp-bar{display:none!important}
+  .shp-print-scroll{overflow:visible!important;padding:0!important;display:block!important}
+  .shp-sheet{width:auto!important;min-height:auto!important;box-shadow:none!important;margin:0!important}
+  .shp-label-page{width:auto!important;min-height:auto!important;box-shadow:none!important;margin:0!important;break-after:page;page-break-after:always}
+  .shp-label-page:last-child{break-after:auto;page-break-after:auto}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+@media(max-width:900px){.shp-head-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.shp-head-grid{grid-template-columns:1fr}.shp-grid{grid-template-columns:1fr}}

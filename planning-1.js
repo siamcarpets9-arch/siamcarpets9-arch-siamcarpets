@@ -365,7 +365,8 @@
   function res(label, value, cls = "") { return `<div class="pr ${cls}"><small>${label}</small><strong>${value}</strong></div>`; }
 
   function jobPickerHtml() {
-    const opened = designs.filter((d) => d.job === "OPENED");
+    // sample:true = ข้อมูลตัวอย่างของระบบ (ไม่ใช่งานจริงของบริษัท) ไม่ควรปนกับคิว Planning จริง
+    const opened = designs.filter((d) => d.job === "OPENED" && !d.sample);
     const plans = loadPlans();
     if (!opened.length) return `<p class="col-empty">ยังไม่มี Job ที่ฝ่ายขายส่งมา Planning</p>`;
     return `<div class="pw-job-grid">${opened.map((d) => {

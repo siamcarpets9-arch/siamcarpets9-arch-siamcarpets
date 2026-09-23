@@ -84,6 +84,35 @@
 #weaveIssueView .col-empty{padding:16px;text-align:center;color:var(--muted);font-size:11px}
 #weaveIssueView table.calc-table{min-width:0}
 
+/* หน้าจอทอ (ภาพรวม) — การ์ดต่อจอทอ */
+.wfb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+.wfb-card{background:#fff;border:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:8px}
+.wfb-head{display:flex;gap:10px;align-items:flex-start}
+.wfb-loom{flex-shrink:0;min-width:52px;padding:6px 8px;background:#f0f6f5;border:1px solid var(--line);text-align:center}
+.wfb-loom small{display:block;color:var(--muted);font-size:8px;font-weight:900}
+.wfb-loom strong{display:block;font-size:20px;color:var(--teal);line-height:1.2}
+.wfb-headinfo{flex:1;min-width:0}
+.wfb-badges{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.wfb-badges strong{font-size:11px}
+.wfb-market{display:inline-block;padding:2px 7px;border-radius:3px;background:#eef2f1;color:var(--muted);font-size:9px;font-weight:900}
+.wfb-cust{margin-top:3px;font-size:10.5px;color:var(--ink);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wfb-due{color:var(--muted)}
+.wfb-edit{flex-shrink:0;width:26px;height:26px;border:1px solid var(--line);background:#fff;color:var(--teal);cursor:pointer;font-size:12px}
+.wfb-img{width:100%;height:120px;object-fit:cover;border:1px solid var(--line);background:#f7faf9}
+.wfb-img-empty{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:9px;text-align:center;padding:8px}
+.wfb-weavers{display:flex;gap:6px;font-size:10px;align-items:baseline}
+.wfb-weavers small{color:var(--muted);font-weight:900;flex-shrink:0}
+.wfb-weavers span{color:var(--ink)}
+.wfb-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:6px}
+.wfb-stat{padding:7px 8px;background:#f7faf9;border:1px solid var(--line);text-align:center}
+.wfb-stat small{display:block;color:var(--muted);font-size:8.5px;font-weight:900}
+.wfb-stat strong{display:block;margin-top:3px;font-size:13px}
+.wfb-stat.main{border-top:3px solid var(--teal)}
+.wfb-stat.warn strong{color:var(--red)}
+.wfb-progress{height:6px;background:#e9eeee}
+.wfb-progress-bar{height:100%;background:var(--teal)}
+.wfb-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--muted);font-size:9px}
+
 @media(max-width:900px){
   .pw-row{flex-direction:column;align-items:stretch}
   .pf,.pr{width:100%}

@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Order to Production Workflow - Siam Carpets</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="design-extra.css">
+  <link rel="stylesheet" href="cost.css">
+  <link rel="stylesheet" href="sales.css">
+  <link rel="stylesheet" href="calc.css">
+  <link rel="stylesheet" href="colors.css">
+  <link rel="stylesheet" href="moform.css">
+  <link rel="stylesheet" href="planning.css">
+  <link rel="stylesheet" href="overview.css">
+  <link rel="stylesheet" href="shipping.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span>SC</span><div><strong>Order to Production</strong><small>SIAM CARPETS MANUFACTURING CO., LTD.</small></div></div>
+    <nav>
+      <button class="nav-link active" data-view="overview">ภาพรวมการผลิต</button>
+      <button class="nav-link" data-view="design">Design</button>
+      <button class="nav-link" data-view="cost">ต้นทุน Design</button>
+      <button class="nav-link" data-view="sales">Sales</button>
+      <button class="nav-link" data-view="salesreport">รายงานขาย</button>
+      <button class="nav-link" data-view="shipping">ใบส่ง/Marks&amp;Nos</button>
+      <button class="nav-link" data-view="calc">เครื่องคำนวณ</button>
+      <button class="nav-link" data-view="colors">โค้ดสี</button>
+      <button class="nav-link" data-view="planwork">ใบวางแผนงาน</button>
+      <button class="nav-link" data-view="pattern">เจาะลาย/ขยายลาย</button>
+      <button class="nav-link" data-view="weaveissue">ส่งแผนกทอ</button>
+      <button class="nav-link" data-view="weavefloor">แผนกทอ (จอทอรายวัน)</button>
+      <button class="nav-link" data-view="finishing">ทากาวตกแต่ง</button>
+      <button class="nav-link" data-view="qcdash">QC Dashboard</button>
+      <button class="nav-link">Production</button>
+      <button class="nav-link">Dyeing</button>
+      <button class="nav-link">Weaving</button>
+      <button class="nav-link">Finishing</button>
+      <button class="nav-link">Store</button>
+      <button class="nav-link">KPI</button>
+      <button class="nav-link gold">ตั้งค่า</button>
+      <a class="nav-link qc-external-link" href="qc-dashboard/index.html" target="_blank" rel="noopener" title="ระบบวางแผน/QC เดิม (Google Sheets + Apps Script) — เปิดแยกอีกแท็บ">แผน+QC (ระบบเดิม) ↗</a>
+    </nav>
+  </header>
+
+  <main class="shell">
+    <section class="workflow-strip">
+      <div class="workflow-step active" data-workflow="design"><b>1</b><span><strong>Design</strong><small>จัดทำและอนุมัติแบบ</small></span></div>
+      <i></i>
+      <div class="workflow-step" data-workflow="sales"><b>2</b><span><strong>Sales</strong><small>ยืนยันราคาและเปิดงาน</small></span></div>
+      <i></i>
+      <div class="workflow-step" data-workflow="planning"><b>3</b><span><strong>Planning</strong><small>วางแผนการผลิต</small></span></div>
+    </section>
+
+    <section id="overviewView" class="app-view active-view"></section>
+
+    <section id="designView" class="app-view">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">DESIGN DEPARTMENT</p>
+          <h1>รายการจัดทำแบบก่อนรับงาน</h1>
+          <p class="subtitle">จัดทำ Artwork, Colorway และ Technical Specification ให้ครบก่อนส่งต่อฝ่ายขาย</p>
+        </div>
+        <div class="heading-actions"><span>อัปเดต 21 ก.ย. 2026</span><button id="addDesignButton">+ รับคำขอออกแบบ</button></div>
+      </section>
+      <section id="designSummary" class="summary-cards workflow-cards"></section>
+      <section class="import-panel">
+        <div>
+          <p class="eyebrow">DESIGN DATA INPUT</p>
+          <h2>นำเข้าตารางทำแบบหรือกรอกข้อมูลเอง</h2>
+          <p>รองรับหัวตารางจากไฟล์ 2026_ตารางทำแบบ.xlsx และบันทึกข้อมูลไว้ในเบราว์เซอร์นี้เพื่อคำนวณ KPI</p>
+        </div>
+        <div class="import-actions">
+          <label class="file-picker">เลือกไฟล์ Excel<input id="designFile" type="file" accept=".xlsx,.xls,.csv"></label>
+          <select id="sheetPicker" disabled><option>เลือกชีตหลังอัปโหลด</option></select>
+          <button id="importDesignButton" class="action-button primary" disabled>นำเข้า</button>
+          <button id="addDesignButton" class="action-button">+ กรอกข้อมูลเอง</button>
+        </div>
+        <small id="importStatus" class="import-status">ยังไม่ได้เลือกไฟล์</small>
+      </section>
+      <section id="designFormPanel" class="manual-form-panel" hidden>
+        <div class="panel-heading"><div><strong>เพิ่มรายการทำแบบ</strong><small>กรอกตามหัวตารางในไฟล์ Excel</small></div><button id="closeDesignForm" class="text-button">ปิด</button></div>
+        <form id="designForm" class="design-form">
+          <label>วันที่รับงาน<input name="receivedDate" type="date" required></label>
+          <label>กำหนดส่งงาน<input name="dueDate" type="date"></label>
+          <label>เกรด<input name="grade" placeholder="A / B"></label>
+          <label>Design No.<input name="id" required placeholder="DES-26-001"></label>
+          <label>Description<input name="description" value="ทำแบบ"></label>
+          <label>Customer<input name="customer" required></label>
+          <label>Project<input name="project"></label>
+          <label>Designer<input name="designer" required></label>
+          <label>วันที่ส่งงาน<input name="submittedDate" type="date"></label>
+          <label>หมายเหตุ<input name="note"></label>
+          <button class="action-button primary" type="submit">บันทึกรายการ</button>
+        </form>
+      </section>
+      <section class="kpi-panel">
+        <div class="panel-heading"><div><strong>Design KPI</strong><small>คำนวณจากรายการที่นำเข้าหรือกรอกในระบบ</small></div><span id="designKpiOwner">Design Department</span></div>
+        <div id="designKpiGrid" class="design-kpi-grid"></div>
+      </section>
+      <section class="designer-kpi-panel">
+        <div class="panel-heading">
+          <div><strong>KPI แยกตาม Designer</strong><small>รวมชื่อโดยไม่แยกตัวพิมพ์เล็ก-ใหญ่ และคำนวณจากวันที่ในตารางทำแบบ</small></div>
+          <div class="designer-kpi-controls">
+            <label>ช่วงเวลา
+              <select id="designerKpiPeriod">
+                <option value="all">ทุกช่วงเวลา</option>
+              </select>
+            </label>
+            <span id="designerKpiCount">0 Designer</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="designer-kpi-table">
+            <thead><tr><th>Designer</th><th>จำนวนงาน</th><th>ส่งงานแล้ว</th><th>ส่งตรงเวลา</th><th>อัตราตรงเวลา</th><th>งานค้าง</th><th>เกินกำหนด</th><th>Lead time เฉลี่ย</th><th>สถานะ</th></tr></thead>
+            <tbody id="designerKpiTable"></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="department-panel">
+        <div class="panel-heading"><div><strong>Design Request Register</strong><small>แบบต้องมีสถานะ “อนุมัติแล้ว” จึงจะส่งต่อให้ฝ่ายขายได้</small></div><label>ค้นหา<input id="designSearch" placeholder="Design No., Project หรือลูกค้า"></label></div>
+        <div class="table-wrap"><table><thead><tr><th>Design No.</th><th>Project / Customer</th><th>Design Scope</th><th>Due Date</th><th>Progress</th><th>Status</th><th>Action</th></tr></thead><tbody id="designTable"></tbody></table></div>
+      </section>
+    </section>
+
+    <section id="costView" class="app-view">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">DESIGN COST</p>
+          <h1>ต้นทุนแผนก Design ต่อ Project</h1>
+          <p class="subtitle">คำนวณจากจำนวนแบบ เวลาทำงานปกติ โอที และการออกวัดพื้นที่ พร้อมระบุ Sale ผู้ดำเนินการ</p>
+        </div>
+        <div class="heading-actions cost-actions">
+          <label>ช่วงเวลา<select id="costPeriod"><option value="all">ทุกช่วงเวลา</option></select></label>
+          <button data-act="toggle-settings">ตั้งค่าอัตราและ Sale</button>
+          <button class="primary-action" data-act="new-trip">+ บันทึกทริปวัดพื้นที่</button>
+        </div>
+      </section>
+
+      <div id="costNotices"></div>
+      <section id="costSummary" class="cost-kpi-grid"></section>
+
+      <section class="department-panel cost-insight">
+        <div class="panel-heading"><div><strong>ข้อสังเกตอัตโนมัติ</strong><small>สรุปจากข้อมูลในช่วงเวลาที่เลือก · ตัวประมาณเวลาใช้ชั่วโมงมาตรฐานต่อประเภทงานและภาระงานรายวันของ Designer (ไม่ได้เรียก AI ภายนอก)</small></div></div>
+        <ul id="costInsights"></ul>
+      </section>
+
+      <section id="costSettingsPanel" class="department-panel cost-settings" hidden>
+        <div class="panel-heading"><div><strong>ตั้งค่าอัตราค่าแรง เวลาโอที และ Sale</strong><small>แก้แล้วคำนวณใหม่ทันที · เก็บไว้ในเบราว์เซอร์นี้</small></div><button class="text-button" data-act="toggle-settings">ปิด</button></div>
+        <div id="costSettingsBody"></div>
+      </section>
+
+      <section id="tripFormPanel" class="manual-form-panel" hidden>
+        <div class="panel-heading"><div><strong>บันทึกทริปออกวัดพื้นที่</strong><small>ระบบแยกชั่วโมงปกติ / โอที / วันหยุด จากเวลาออก–กลับ แล้วคิดค่าแรงตามเงินเดือนของผู้ไปวัด</small></div><button class="text-button" data-act="close-trip-form">ปิด</button></div>
+        <form id="tripForm" class="trip-form" autocomplete="off">
+          <label>วันที่<input name="date" type="date" required></label>
+          <label>Customer<input name="customer" list="tripCustomerList" required placeholder="ชื่อลูกค้า"></label>
+          <label>Project<input name="project" list="tripProjectList" required placeholder="ชื่อ Project"></label>
+          <label>สถานที่<input name="place" placeholder="เช่น หน้างาน / โรงแรม"></label>
+          <label>เวลาออกเดินทาง<input name="start" type="time" value="08:00" required></label>
+          <label>เวลากลับถึง<input name="end" type="time" value="17:30" required></label>
+          <fieldset class="trip-people"><legend>ผู้ไปวัดพื้นที่</legend><div id="tripPeople"></div></fieldset>
+          <label>ค่าน้ำมัน/ค่ารถ<input name="fuel" type="number" min="0" step="1" value="0"></label>
+          <label>ค่าทางด่วน<input name="toll" type="number" min="0" step="1" value="0"></label>
+          <label>ค่าที่พัก<input name="lodging" type="number" min="0" step="1" value="0"></label>
+          <label>ค่าอาหาร/เบี้ยเลี้ยง<input name="meal" type="number" min="0" step="1" value="0"></label>
+          <label>อื่น ๆ<input name="other" type="number" min="0" step="1" value="0"></label>
+          <label class="trip-note">หมายเหตุ<input name="note"></label>
+          <p id="tripPreview" class="trip-preview"></p>
+          <button class="action-button primary" type="submit">บันทึกทริป</button>
+        </form>
+        <datalist id="tripCustomerList"></datalist><datalist id="tripProjectList"></datalist>
+      </section>
+
+      <section class="department-panel">
+        <div class="panel-heading">
+          <div><strong>ต้นทุนต่อ Project</strong><small>ค่าแรงทำแบบ (ปกติ + โอที) รวมค่าออกวัดพื้นที่ · แถบสี: <i class="cost-dot n"></i>ปกติ <i class="cost-dot o"></i>โอที <i class="cost-dot s"></i>วัดพื้นที่</small></div>
+          <div class="cost-filters">
+            <span id="costProjectCount">0 Project</span>
+            <label>ค้นหา<input id="costSearch" placeholder="Project, ลูกค้า หรือ Sale"></label>
+            <label>Sale<select id="costSaleFilter"><option value="all">ทุก Sale</option></select></label>
+            <label>เรียงตาม<select id="costSort"><option value="total">ต้นทุนรวม</option><option value="perDrawing">ต้นทุนต่อแบบ</option><option value="drawings">จำนวนแบบ</option><option value="ot">ชั่วโมงโอที</option><option value="name">ชื่อ Project</option></select></label>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="cost-table">
+            <thead><tr><th>Project / Customer</th><th>Sale ผู้ดำเนินการ</th><th class="num">จำนวนแบบ</th><th class="num">ชม.ปกติ</th><th class="num">ชม.โอที</th><th class="num">ค่าแรงทำแบบ</th><th class="num">ออกวัดพื้นที่</th><th class="num">ต้นทุนรวม</th><th class="num">ต่อแบบ</th><th>Designer</th><th></th></tr></thead>
+            <tbody id="costProjectBody"></tbody>
+            <tfoot id="costProjectFoot"></tfoot>
+          </table>
+        </div>
+        <datalist id="costSaleList"></datalist>
+      </section>
+
+      <section id="costDetailPanel" class="department-panel" hidden>
+        <div id="costDetailHead" class="panel-heading cost-detail-head"></div>
+        <div class="cost-detail-tools"><small>แก้ชั่วโมง ปกติ / โอที / วันหยุด ของแบบใดก็ได้เพื่อใช้ค่าจริงแทนค่าประมาณ</small><button class="action-button" data-act="trip-for-project">+ ทริปวัดพื้นที่ของ Project นี้</button></div>
+        <div class="table-wrap cost-detail-scroll">
+          <table class="cost-table detail">
+            <thead><tr><th>Design No.</th><th>ประเภทงาน</th><th>Designer</th><th>รับงาน</th><th>ส่งงาน</th><th class="num">ชม.ปกติ</th><th class="num">ชม.โอที</th><th class="num">ชม.วันหยุด</th><th class="num">ต้นทุน</th><th>ที่มาของเวลา</th></tr></thead>
+            <tbody id="costDetailBody"></tbody>
+          </table>
+        </div>
+        <div class="panel-heading sub"><div><strong>ทริปออกวัดพื้นที่ของ Project นี้</strong></div></div>
+        <div class="table-wrap">
+          <table class="cost-table">
+            <thead><tr><th>วันที่</th><th>Project / สถานที่</th><th>Sale</th><th>ผู้ไปวัด</th><th class="num">ชม./คน</th><th class="num">ค่าแรง</th><th class="num">ค่าใช้จ่าย</th><th class="num">รวม</th><th></th></tr></thead>
+            <tbody id="costDetailTrips"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="cost-two-col">
+        <section class="department-panel">
+          <div class="panel-heading"><div><strong>สรุปตาม Sale ผู้ดำเนินการ</strong><small>รวมต้นทุนของ Project ที่ Sale ดูแล</small></div></div>
+          <div class="table-wrap"><table class="cost-table compact"><thead><tr><th>Sale</th><th class="num">Project</th><th class="num">แบบ</th><th class="num">ชม.ปกติ / โอที</th><th class="num">ทริป</th><th class="num">ต้นทุนรวม</th></tr></thead><tbody id="costSaleBody"></tbody></table></div>
+        </section>
+        <section class="department-panel">
+          <div class="panel-heading"><div><strong>สรุปตาม Designer</strong><small>ชั่วโมงและต้นทุนตามผู้ทำแบบ</small></div></div>
+          <div class="table-wrap"><table class="cost-table compact"><thead><tr><th>Designer</th><th class="num">แบบ</th><th class="num">ชม.ปกติ</th><th class="num">ชม.โอที</th><th class="num">ทำแบบ</th><th class="num">วัดพื้นที่</th><th class="num">รวม</th></tr></thead><tbody id="costDesignerBody"></tbody></table></div>
+        </section>
+      </div>
+
+      <section class="department-panel">
+        <div class="panel-heading"><div><strong>บันทึกทริปออกวัดพื้นที่ทั้งหมด</strong><small>ตามช่วงเวลาที่เลือก</small></div><span id="costTripCount" class="cost-count">0 ทริป</span></div>
+        <div class="table-wrap">
+          <table class="cost-table">
+            <thead><tr><th>วันที่</th><th>Project / สถานที่</th><th>Sale</th><th>ผู้ไปวัด</th><th class="num">ชม./คน</th><th class="num">ค่าแรง</th><th class="num">ค่าใช้จ่าย</th><th class="num">รวม</th><th></th></tr></thead>
+            <tbody id="costTripBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <section id="salesView" class="app-view">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">SALES DEPARTMENT</p>
+          <h1>ตรวจแบบและเปิดงานขาย</h1>
+          <p class="subtitle">ฝ่ายขายตรวจแบบ ราคา และเงื่อนไข ก่อนเปิด Job ไปยังแผนกวางแผน</p>
+        </div>
+        <div class="heading-actions"><span id="salesGateLabel">แบบอนุมัติ 0 รายการ</span><button id="refreshSalesButton">รีเฟรชรายการ</button></div>
+      </section>
+      <section id="salesSummary" class="summary-cards workflow-cards"></section>
+      <section class="department-panel">
+        <div class="panel-heading"><div><strong>Sales Job Opening</strong><small>เปิดงานได้เมื่อ Design อนุมัติแบบและ Quotation พร้อมแล้ว</small></div><label>ค้นหา<input id="salesSearch" placeholder="Design No., Project หรือลูกค้า"></label></div>
+        <div class="table-wrap"><table><thead><tr><th>Design Ref.</th><th>Project / Customer</th><th>Design Status</th><th>Quotation</th><th>Sales Owner</th><th>Job Status</th><th>Action</th></tr></thead><tbody id="salesTable"></tbody></table></div>
+      </section>
+    </section>
+
+    <section id="salesreportView" class="app-view">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">SALES REPORT</p>
+          <h1>รายงานฝ่ายขาย · M/O และ SO ตัวอย่าง</h1>
+          <p class="subtitle">แยกรายงานต่างประเทศ / ในประเทศ · เลข run อัตโนมัติแก้ไขได้ · สรุป ตร.ม. รับเข้า–ส่งออก และยอดขายเป็น KPI ฝ่ายขาย</p>
+        </div>
+        <div class="heading-actions sr-actions">
+          <button class="primary-action" data-sr="new-mo">+ เปิด M/O</button>
+          <button data-sr="new-so">+ SO ตัวอย่าง</button>
+          <button data-sr="toggle-import">นำเข้า Excel</button>
+          <button data-sr="export">ดาวน์โหลด Excel</button>
+          <button data-sr="toggle-sales">Sale ผู้ดำเนินการ</button>
+          <button data-sr="toggle-series">ตั้งค่าเลข run</button>
+          <button data-mo="blank" title="ฟอร์ม M/O หน้า 1–2 ว่าง ๆ ขนาด A3">ฟอร์ม M/O เปล่า (A3)</button>
+        </div>
+      </section>
+
+      <div id="srMarketTabs" class="sr-tabs"></div>
+
+      <section id="srImportPanel" class="sr-panel sr-import" hidden>
+        <div class="panel-heading"><div><strong>นำเข้ารายงาน Excel (Reports M/O)</strong><small>อ่านหัวตารางอัตโนมัติ · แถวย่อยที่ไม่มีเลข M/O จะรวมเข้า M/O ก่อนหน้า · นำเข้าซ้ำจะแทนที่ข้อมูลที่นำเข้าเดิมของตลาดและปีเดียวกัน</small></div><button class="text-button" data-sr="toggle-import">ปิด</button></div>
+        <div class="sr-import-row">
+          <label class="file-picker">เลือกไฟล์ Excel<input id="srFile" type="file" accept=".xlsx,.xls"></label>
+          <label>ชีต<select id="srSheet" disabled><option>เลือกหลังอัปโหลด</option></select></label>
+          <label>นำเข้าเป็น<select id="srImportMarket"><option value="FOREIGN">ต่างประเทศ</option><option value="DOMESTIC">ในประเทศ</option></select></label>
+          <label>วันที่ที่ Excel สลับวัน/เดือน<select id="srDateMode"><option value="auto">ซ่อมอัตโนมัติ (แนะนำ)</option><option value="swap">สลับทุกวันที่ที่กำกวม</option><option value="asis">ใช้ตามไฟล์</option></select></label>
+          <button id="srImportBtn" class="action-button primary" disabled>นำเข้า</button>
+          <button id="srClearImport" class="action-button">ลบข้อมูลที่นำเข้าของตลาดนี้</button>
+        </div>
+        <small id="srImportStatus" class="import-status">ยังไม่ได้เลือกไฟล์</small>
+      </section>
+
+      <section id="srSeriesPanel" class="sr-panel" hidden>
+        <div class="panel-heading"><div><strong>ตั้งค่าเลข run</strong><small>เลขถัดไปคิดจากเลขสูงสุดของปีนั้น +1 อัตโนมัติ · ใส่ “เลขถัดไป” เพื่อบังคับ · แก้เลขในฟอร์มแต่ละใบได้เสมอ</small></div><button class="text-button" data-sr="toggle-series">ปิด</button></div>
+        <div class="table-wrap"><table class="sr-table compact"><thead><tr><th>ชุดเลข</th><th>ตัวอย่าง</th><th>Prefix</th><th>จำนวนหลัก</th><th>เลขถัดไป (ปีนี้)</th></tr></thead><tbody id="srSeriesBody"></tbody></table></div>
+        <div class="sr-fx"><label>เรตแปลง USD → THB (ไม่บังคับ ใช้แสดงยอดเทียบเป็นบาท)<input id="srFx" type="number" min="0" step="0.01" placeholder="เช่น 35.00"></label></div>
+      </section>
+
+      <section id="srSaleMapPanel" class="sr-panel" hidden>
+        <div class="panel-heading"><div><strong>Sale ผู้ดำเนินการ · จับคู่ลูกค้า → Sale</strong><small>ใส่ชื่อ Sale ของลูกค้าแต่ละราย (ของตลาดที่เลือก) ระบบใช้กับทุก M/O / SO ของลูกค้านั้น · แก้เฉพาะรายใบได้ในตารางทะเบียนหรือในฟอร์ม · ถ้าไม่ได้ตั้งไว้ จะใช้ตารางลูกค้า → Sale ของหน้า “ต้นทุน Design” ที่ชื่อลูกค้าตรงกัน</small></div><button class="text-button" data-sr="toggle-sales">ปิด</button></div>
+        <div id="srSaleMapGrid" class="sr-salegrid"></div>
+      </section>
+
+      <section class="sr-panel">
+        <div class="panel-heading sr-kpi-head">
+          <div><strong id="srKpiTitle">KPI ฝ่ายขาย</strong><small>รับเข้า = ตร.ม. ตามวันเปิด M/O · ส่งออก = ตร.ม. ตามวันส่งจริง (ถ้ายืนยัน) หรือวัน Dispatch ในรายงาน</small></div>
+          <div class="sr-period">
+            <label>ปี<select id="srYear"></select></label>
+            <label>เดือน<select id="srMonth"></select></label>
+            <label>วัน<select id="srDay"></select></label>
+            <label>Sale<select id="srSale"></select></label>
+          </div>
+        </div>
+        <div id="srKpi" class="sr-kpi-grid"></div>
+      </section>
+
+      <section id="srSalePanel" class="sr-panel">
+        <div class="panel-heading"><div><strong id="srSaleTitle">ยอดขายแยก Sale</strong><small>ตามช่วงเวลาที่เลือกด้านบน · คลิกแถวเพื่อกรองทั้งหน้าเป็น Sale คนนั้น (คลิกซ้ำเพื่อยกเลิก) · ยังไม่ได้จับคู่จะอยู่ในแถว “ไม่ระบุ Sale”</small></div></div>
+        <div class="table-wrap"><table class="sr-table"><thead><tr><th>Sale</th><th class="num">M/O เปิด</th><th class="num">รับเข้า (ตร.ม.)</th><th class="num">ยอดขาย</th><th>สัดส่วนยอดขาย</th><th class="num">ส่งออก (ตร.ม.)</th><th class="num">มูลค่าส่งออก</th><th class="num">SO (อนุมัติ/ทั้งหมด)</th></tr></thead><tbody id="srSaleBody"></tbody><tfoot id="srSaleFoot"></tfoot></table></div>
+        <div class="panel-heading sub"><div><strong id="srSaleMatrixTitle">รายเดือนแยก Sale</strong><small>เดือนที่เลือกไฮไลต์ไว้ · ยอดเงินเป็นสกุลเงินของตลาดที่เลือก</small></div><label>ตัวชี้วัด<select id="srSaleMetric"><option value="inAmt">ยอดขาย (ตามวันเปิด M/O)</option><option value="inSqm">รับเข้า (ตร.ม.)</option><option value="outSqm">ส่งออก (ตร.ม.)</option><option value="outAmt">มูลค่าส่งออก</option></select></label></div>
+        <div class="table-wrap"><table class="sr-table"><thead id="srSaleMatrixHead"></thead><tbody id="srSaleMatrixBody"></tbody><tfoot id="srSaleMatrixFoot"></tfoot></table></div>
+      </section>
+
+      <section class="sr-panel">
+        <div class="panel-heading"><div><strong id="srMonthlyTitle">สรุปรายเดือน</strong><small>คลิกแถวเพื่อกรองเป็นรายเดือน</small></div><span class="sr-legend"><i class="in"></i>รับเข้า <i class="out"></i>ส่งออก</span></div>
+        <div class="table-wrap"><table class="sr-table"><thead><tr><th>เดือน</th><th class="num">M/O เปิด</th><th class="num">รับเข้า (ตร.ม.)</th><th class="num">ยอดขาย</th><th class="num">ส่งออก (ตร.ม.)</th><th class="num">มูลค่าส่งออก</th><th class="num">SO (อนุมัติ/ทั้งหมด)</th><th></th></tr></thead><tbody id="srMonthlyBody"></tbody><tfoot id="srMonthlyFoot"></tfoot></table></div>
+      </section>
+
+      <section id="srDailyPanel" class="sr-panel" hidden>
+        <div class="panel-heading"><div><strong id="srDailyTitle">สรุปรายวัน</strong><small>เฉพาะวันที่มีรายการ · คลิกแถวเพื่อกรองเป็นรายวัน</small></div></div>
+        <div class="table-wrap"><table class="sr-table"><thead><tr><th>วันที่</th><th class="num">M/O เปิด</th><th class="num">รับเข้า (ตร.ม.)</th><th class="num">ยอดขาย</th><th class="num">ส่งออก (ตร.ม.)</th><th class="num">มูลค่าส่งออก</th><th></th></tr></thead><tbody id="srDailyBody"></tbody></table></div>
+      </section>
+
+      <section class="sr-panel">
+        <div class="panel-heading sr-reg-head">
+          <div id="srRegTabs" class="sr-subtabs"></div>
+          <div class="sr-filters">
+            <label>แสดง<select id="srScope"><option value="all">ทั้งหมด</option><option value="open">เปิดในช่วงที่เลือก</option><option value="ship">ส่งออกในช่วงที่เลือก</option></select></label>
+            <label>ค้นหา<input id="srSearch" placeholder="เลขที่, ลูกค้า, Project, Design"></label>
+            <span id="srRegCount" class="cost-count"></span>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="sr-table" id="srRegTable"><thead id="srRegHead"></thead><tbody id="srRegBody"></tbody></table></div>
+      </section>
+    </section>
+
+    <section id="calcView" class="app-view"></section>
+    <section id="colorsView" class="app-view"></section>
+
+    <section id="planningView" class="app-view">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">MASTER PRODUCTION SCHEDULE</p>
+          <h1>ตารางแผนผลิตรวม (Gantt) ทุกแผนก</h1>
+          <p class="subtitle">แสดงเฉพาะ Job ที่ฝ่ายขายเปิดงานและส่งมายัง Planning แล้ว</p>
+        </div>
+        <div class="heading-actions"><span>อัปเดต 21 ก.ย. 2026</span><button id="refreshButton">รีเฟรชข้อมูล</button></div>
+      </section>
+      <section id="summaryCards" class="summary-cards"></section>
+      <section class="control-strip">
+        <div class="segmented"><button class="view-btn active" data-scale="week">สัปดาห์</button><button class="view-btn" data-scale="month">เดือน</button><button class="view-btn" data-scale="quarter">ไตรมาส</button></div>
+        <label class="check-control"><input id="hideDone" type="checkbox"> ซ่อนงานเสร็จแล้ว</label>
+        <label class="check-control"><input id="showToday" type="checkbox" checked> แสดงวันนี้</label>
+        <div class="control-spacer"></div><span class="range-label">21 ก.ย. 2026 – 27 ก.ย. 2026</span>
+        <button class="square-btn" id="prevWeek">‹</button><button class="square-btn" id="nextWeek">›</button>
+      </section>
+      <section class="legend-row">
+        <span><i class="legend production"></i>Production</span><span><i class="legend dyeing"></i>Dyeing</span><span><i class="legend weaving"></i>Weaving</span><span><i class="legend finishing"></i>Finishing</span><span><i class="legend store"></i>Store</span><span><i class="legend milestone"></i>Milestone</span>
+        <label>ค้นหา<input id="searchInput" placeholder="ค้นหา Job, Project หรือแผนก"></label>
+      </section>
+      <section class="gantt-panel">
+        <div class="gantt-toolbar"><strong>Master Plan · Production Schedule</strong><span id="resultCount">0 งาน</span><span class="toolbar-note">Design approved → Sales opened → Planning</span></div>
+        <div class="gantt"><div class="gantt-left"><div class="left-head">รายการงาน</div><div id="taskRows"></div></div><div class="gantt-right"><div id="dateHeader" class="date-header"></div><div id="barsArea" class="bars-area"></div></div></div>
+      </section>
+      <section class="bottom-panel"><div><strong>Job ที่รอจัดสรรแผน</strong><p>งานที่ฝ่ายขายเปิดแล้ว แต่ Planning ยังไม่ได้กำหนดวันเริ่ม</p></div><span id="unallocatedCount">0 รายการ</span></section>
+      <section class="department-panel pw-card" style="margin-top:10px">
+        <div class="panel-heading"><div><strong>KPI แผนกวางแผน — ส่งตรงตามกำหนด</strong><small>วันส่งจริงตัดจากฝ่ายขาย (ต้องมีทั้งเลข INV และวันที่ยืนยันส่งจริง) เทียบกับกำหนดที่ Planning วางแผนไว้</small></div></div>
+        <div class="pw-body" id="planningKpiTable"></div>
+      </section>
+      <section class="department-panel pw-card" style="margin-top:10px">
+        <div class="panel-heading"><div><strong>คำขอไหมเพิ่มจากแผนกทอ (รอออกใบสั่งย้อม)</strong><small>เกิดจากแผนกทอแจ้งว่าไหมสีใดไม่พอ — ยืนยันผู้อนุมัติและออกใบสั่งย้อมเพิ่มได้ที่หน้า "แผนกทอ" แท็บ "สรุป/ส่งออก/แจ้งเตือน"</small></div></div>
+        <div class="pw-body" id="planningYarnRequests"></div>
+      </section>
+    </section>
+
+    <section id="shippingView" class="app-view"></section>
+    <section id="planworkView" class="app-view"></section>
+    <section id="patternView" class="app-view"></section>
+    <section id="weaveissueView" class="app-view"></section>
+    <section id="weavefloorView" class="app-view"></section>
+    <section id="finishingView" class="app-view"></section>
+    <section id="qcdashView" class="app-view"></section>
+  </main>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="app.js"></script>
+  <script src="cost.js"></script>
+  <datalist id="srSaleList"></datalist>
+  <div id="srDialog" class="sr-dialog" hidden><div class="sr-dialog-card"><div id="srDialogBody"></div></div></div>
+  <script src="calc.js"></script>
+  <script src="colors.js"></script>
+  <script src="sales.js"></script>
+  <script src="shipping.js"></script>
+  <script src="moform.js"></script>
+  <script src="planning.js"></script>
+  <script src="pattern.js"></script>
+  <script src="weaving.js"></script>
+  <script src="weave-floor.js"></script>
+  <script src="finishing.js"></script>
+  <script src="overview.js"></script>
+  <script>if (typeof setView === "function") setView("overview");</script>
+</body>
+</html>

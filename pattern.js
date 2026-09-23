@@ -60,6 +60,40 @@
     list.splice(idx, 1);
     savePatternWorkers(list);
   }
+  function exportPatternWorkersExcel() {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const rows = [["แผนก", "ชื่อ-นามสกุล"], ...loadPatternWorkers().map((w) => ["เจาะลาย/ขยายลาย/ปั๊มผ้า", w])];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "พนักงานเจาะลาย-ปั๊มผ้า");
+    XLSX.writeFile(wb, "รายชื่อพนักงาน-เจาะลาย-ปั๊มผ้า.xlsx");
+  }
+  const KEY_WORKERS_SHARED_EXT = "siam-workforce"; // ทะเบียนทอ/ตกแต่ง — ไฟล์นำเข้าเดียวแยกลงได้ทั้ง 2 ทะเบียนไม่ว่าจะอัปโหลดจากหน้าไหน
+  async function importPatternWorkersExcel(file) {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const patternList = loadPatternWorkers();
+    const sharedList = readJson(KEY_WORKERS_SHARED_EXT, []);
+    let patternAdded = 0, sharedAdded = 0;
+    wb.SheetNames.forEach((sn) => {
+      XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "", raw: false }).forEach((row) => {
+        const dept = String(row[0] || "").trim();
+        const name = String(row[1] || "").trim();
+        if (!name || /ชื่อ.?นามสกุล|ตัวอย่าง/.test(name)) return;
+        const isPattern = /เจาะลาย|ขยายลาย|ปั๊ม|ดีไซน์/.test(dept);
+        const isShared = /ทอ|ตกแต่ง|แต่ง/.test(dept);
+        // ไม่ระบุแผนก = ถือว่าเป็นแผนกของหน้านี้ (เจาะลาย/ปั๊มผ้า)
+        if (isPattern || (!dept && !isShared)) {
+          if (!patternList.some((w) => w.toLowerCase() === name.toLowerCase())) { patternList.push(name); patternAdded++; }
+        }
+        if (isShared) {
+          if (!sharedList.some((w) => w.toLowerCase() === name.toLowerCase())) { sharedList.push(name); sharedAdded++; }
+        }
+      });
+    });
+    savePatternWorkers(patternList);
+    writeJson(KEY_WORKERS_SHARED_EXT, sharedList);
+    toast(`นำเข้ารายชื่อพนักงานแล้ว — เจาะลาย/ปั๊มผ้า ${patternAdded} คน, ทอ/ตกแต่ง ${sharedAdded} คน`);
+  }
 
   /* ============================================================
      UI
@@ -100,6 +134,8 @@
         <div class="pw-row">
           ${field("ชื่อพนักงาน", `<input id="ppNewWorkerName" placeholder="พิมพ์ชื่อแล้วกดเพิ่มรายชื่อ">`)}
           <button type="button" class="action-button primary" data-add-worker>+ เพิ่มรายชื่อ</button>
+          <button type="button" class="action-button" data-export-pattern-workers>ส่งออก Excel</button>
+          <label class="file-picker">นำเข้าจาก Excel<input type="file" id="ppWorkersImportFile" accept=".xlsx,.xls" data-import-pattern-workers></label>
         </div>
         ${workers.length
           ? `<div class="pw-worker-tags">${workers.map((w, i) => `<span>${esc(w)}<button type="button" class="pw-worker-x" data-remove-worker="${i}" title="ลบรายชื่อนี้">×</button></span>`).join("")}</div>`
@@ -272,6 +308,8 @@
         renderAll();
         return;
       }
+      const expW = e.target.closest("[data-export-pattern-workers]");
+      if (expW) { exportPatternWorkersExcel(); return; }
     });
     root.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && e.target && e.target.id === "ppNewWorkerName") {
@@ -287,6 +325,11 @@
       saveField(e.target.name, e.target.value);
     });
     root.addEventListener("change", (e) => {
+      if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-pattern-workers")) {
+        const file = e.target.files && e.target.files[0];
+        if (file) importPatternWorkersExcel(file).then(() => { renderAll(); e.target.value = ""; });
+        return;
+      }
       const wcb = e.target.hasAttribute && e.target.hasAttribute("data-worker-assign") ? e.target : null;
       if (wcb && state.designId) {
         const rec = loadOrders()[state.designId] || ensureOrder(state.designId);
