@@ -131,3 +131,9 @@
 .sr-salegrid label{display:grid;gap:3px;font-size:10px;color:#4a5a5d}
 .sr-salegrid em{color:var(--muted);font-size:9px;font-style:normal}
 .sr-salegrid input{padding:6px 7px;border:1px solid var(--line);font:inherit;font-size:11px;background:#fff;color:var(--ink);width:100%}
+.sr-photo-field{margin:8px 0 12px;padding:8px 10px;border:1px dashed var(--line);border-radius:4px;background:#fafcfc}
+.sr-photo-field label{display:block;font-size:11px;font-weight:600;color:var(--ink);margin-bottom:6px}
+.sr-photo-field label small{display:block;font-weight:400;color:var(--muted);font-size:9px;margin-top:2px}
+.sr-photo-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sr-photo-preview.dept-row-photo{width:64px;height:64px;border-radius:4px}
+.sr-photo-preview-empty{display:flex;align-items:center;justify-content:center;width:64px;height:64px;border-radius:4px;border:1px dashed var(--line);color:var(--muted);font-size:9px;text-align:center;padding:4px}

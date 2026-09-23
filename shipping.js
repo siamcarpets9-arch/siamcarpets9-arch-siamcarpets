@@ -51,16 +51,20 @@
 
   function docLabel(d) { return `${d.type === "SO" ? "SO " : "M/O "}${d.no}`; }
 
-  // รูปดีไซน์ — ดึงจากรูปแบบพรมที่แนบไว้ในหน้าแผนกทอ (ผูกกับ designId ของ M/O/SO นั้น ไม่ใช่ docId ของใบส่ง)
+  // รูปดีไซน์ — ใช้รูปที่อัปโหลดไว้ที่หน้าขาย (แก้ไข M/O) เป็นหลัก ถ้าไม่มีค่อย fallback ไปรูปแบบพรมแผนกทอ (ผูกกับ designId ของ M/O/SO นั้น ไม่ใช่ docId ของใบส่ง)
   const designPhotoCache = {};
   function designPhoto(docId) {
     if (designPhotoCache[docId] !== undefined) return designPhotoCache[docId];
     const se = SE();
+    const DP = window.DesignPhotoStore;
     const WF = window.WeaveFloorEngine;
     let photo = "";
     try {
       const doc = se && typeof se.getDocs === "function" ? se.getDocs().find((d) => d.id === docId) : null;
-      if (doc && doc.designId && WF && typeof WF.getDesignImage === "function") photo = WF.getDesignImage(doc.designId) || "";
+      if (doc && doc.designId) {
+        if (DP && typeof DP.getDesignPhoto === "function") photo = DP.getDesignPhoto(doc.designId) || "";
+        if (!photo && WF && typeof WF.getDesignImage === "function") photo = WF.getDesignImage(doc.designId) || "";
+      }
     } catch (e) { photo = ""; }
     designPhotoCache[docId] = photo;
     return photo;

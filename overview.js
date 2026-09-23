@@ -63,8 +63,11 @@
     return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(0, 10);
   }
 
-  // รูปดีไซน์ต่อ M/O,S/O — ดึงจากรูปแบบพรมที่แนบไว้ในหน้าแผนกทอ (ยังไม่มีช่องเก็บรูปต่อดีไซน์โดยตรงในระบบ)
+  // รูปดีไซน์ต่อ M/O,S/O — ใช้รูปที่อัปโหลดไว้ที่หน้าขาย (แก้ไข M/O) เป็นหลัก ถ้าไม่มีค่อย fallback ไปรูปแบบพรมแผนกทอ
   function designPhoto(id) {
+    const DP = window.DesignPhotoStore;
+    const fromSales = DP && typeof DP.getDesignPhoto === "function" ? DP.getDesignPhoto(id) : "";
+    if (fromSales) return fromSales;
     const WF = window.WeaveFloorEngine;
     return WF && typeof WF.getDesignImage === "function" ? WF.getDesignImage(id) : "";
   }

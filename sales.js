@@ -11,6 +11,29 @@
 
   const KEY_DOCS = "enterprise-sales-orders";
   const KEY_CFG = "enterprise-sales-settings";
+  // รูปดีไซน์ต่อ M/O,S/O — อัปโหลดครั้งเดียวที่นี่ (หน้าแก้ไข M/O) แล้วใช้ร่วมกันได้ทุกแผนก (ภาพรวม/ใบส่งของ/
+  // หน้าแผนกต่างๆ ที่มีการ์ดเลือกงาน) เก็บแยกเป็นสโตร์กลางของตัวเอง คีย์ด้วย designId ไม่ผูกกับ doc ใดโดยเฉพาะ
+  const KEY_DESIGN_PHOTOS = "siam-design-photos"; // { [designId]: dataUrl }
+  function loadDesignPhotos() { return readJson(KEY_DESIGN_PHOTOS, {}); }
+  function getDesignPhoto(designId) { if (!designId) return ""; return loadDesignPhotos()[designId] || ""; }
+  function setDesignPhoto(designId, dataUrl) { if (!designId) return; const all = loadDesignPhotos(); all[designId] = dataUrl; writeJson(KEY_DESIGN_PHOTOS, all); }
+  function removeDesignPhoto(designId) { if (!designId) return; const all = loadDesignPhotos(); delete all[designId]; writeJson(KEY_DESIGN_PHOTOS, all); }
+  function resizeImageToDataUrl(file, maxW, cb) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        cb(canvas.toDataURL("image/jpeg", 0.75));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+  window.DesignPhotoStore = { getDesignPhoto, setDesignPhoto, removeDesignPhoto };
   const F2_TO_M2 = 0.09290304;
   const MARKETS = { FOREIGN: { label: "ต่างประเทศ", currency: "USD" }, DOMESTIC: { label: "ในประเทศ", currency: "THB" } };
   const SERIES_DEF = {
@@ -819,6 +842,7 @@
     return `<form class="sr-form" id="srForm" autocomplete="off">
       <h2>${form.editing ? "แก้ไข" : "เปิด"} ${isMO ? "M/O" : "SO ตัวอย่าง"}</h2>
       <p class="sub">${isMO ? "M/O เดียวกันมีได้หลายรายการ — ใส่เลขที่ซ้ำกับ M/O เดิมเพื่อเพิ่มรายการเข้าเลขเดิม" : "SO ตัวอย่างส่งให้ลูกค้า Approve — เป็นอิสระจาก M/O ไม่บล็อกการเปิด M/O"}${d.designId ? ` · เชื่อมกับ Design ${esc(d.designId)}` : ""}</p>
+      ${d.designId ? photoFieldHtml(d.designId) : ""}
       <div class="sr-grid">
         <label>ตลาด<select name="market" ${form.editing ? "disabled" : ""}>${Object.entries(MARKETS).map(([k, v]) => `<option value="${k}" ${d.market === k ? "selected" : ""}>${v.label}</option>`).join("")}</select></label>
         <label class="span2">เลขที่ ${isMO ? "M/O" : "SO"} (แก้ไขได้)<span class="sr-noRow"><input name="no" value="${esc(d.no)}" required><button type="button" class="action-button" data-sr="f-nextno">ใช้เลขถัดไป</button></span><span id="srNoHint" class="sr-hint"></span></label>
@@ -836,6 +860,18 @@
       <div id="srFormMsg"></div>
       <div class="sr-form-actions"><button type="button" class="action-button ghost" data-sr="close-dlg">ยกเลิก</button><button type="submit" class="action-button primary">${form.editing ? "บันทึกการแก้ไข" : d.designId && isMO ? "บันทึกและเปิด Job ส่ง Planning" : "บันทึก"}</button></div>
     </form>`;
+  }
+  // รูปดีไซน์ของ M/O,S/O นี้ — อัปโหลดที่นี่ครั้งเดียว แล้วไปโชว์ต่อในหน้าภาพรวม/ใบส่งของ/การ์ดเลือกงานทุกแผนกอัตโนมัติ
+  function photoFieldHtml(designId) {
+    const photo = getDesignPhoto(designId);
+    return `<div class="sr-photo-field">
+      <label>รูปดีไซน์ <small>(อัปโหลดครั้งเดียว ใช้ร่วมกันได้ทุกแผนก — ภาพรวม, ใบส่งของ, หน้าแผนกต่างๆ)</small></label>
+      <div class="sr-photo-row">
+        ${photo ? `<img class="sr-photo-preview dept-row-photo" src="${photo}" alt="">` : `<span class="sr-photo-preview-empty">ยังไม่มีรูป</span>`}
+        <span class="file-picker">${photo ? "เปลี่ยนรูป" : "อัปโหลดรูป"}<input type="file" accept="image/*" data-design-photo-file></span>
+        ${photo ? `<button type="button" class="action-button ghost" data-sr="f-remove-photo">ลบรูป</button>` : ""}
+      </div>
+    </div>`;
   }
   function linesHtml() {
     const isMO = form.draft.type === "MO";
@@ -899,6 +935,18 @@
   function onFormInput(e) {
     const t = e.target, f = $("#srForm");
     if (!f || !form) return;
+    if (t.hasAttribute && t.hasAttribute("data-design-photo-file")) {
+      const file = t.files && t.files[0];
+      if (!file) return;
+      if (!form.draft.designId) { toast("ต้องเชื่อมกับ Design ก่อนถึงจะแนบรูปได้"); return; }
+      resizeImageToDataUrl(file, 640, (dataUrl) => {
+        setDesignPhoto(form.draft.designId, dataUrl);
+        toast("แนบรูปดีไซน์แล้ว — ใช้ร่วมกันได้ทุกแผนกทันที");
+        showDialog(formHtml());
+        updateHint(); updateTotals(); updateSalePh();
+      });
+      return;
+    }
     if (t.dataset.f) { lineInput(t); updateTotals(); return; }
     if (t.name === "no") form.auto = false;
     if (t.name === "market") {
@@ -1010,6 +1058,7 @@
     else if (a === "f-delline") { const ls = readLines(); ls.splice(+el.dataset.i, 1); form.draft.lines = ls.length ? ls : [blankLine()]; $("#srLinesBox").innerHTML = linesHtml(); updateTotals(); }
     else if (a === "f-merge") saveForm(docs.find((d) => d.id === id));
     else if (a === "f-dupno") { msgBox(""); const n = $("#srForm").elements.no; n.focus(); n.select(); }
+    else if (a === "f-remove-photo") { if (form && form.draft.designId) { removeDesignPhoto(form.draft.designId); toast("ลบรูปดีไซน์แล้ว"); showDialog(formHtml()); updateHint(); updateTotals(); updateSalePh(); } }
     else if (a === "ship-save") {
       const v = $("#srShipDate").value, d = docs.find((x) => x.id === id);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) { $("#srFormMsg").innerHTML = `<div class="sr-msg">เลือกวันส่งจริง</div>`; return; }
