@@ -1239,19 +1239,53 @@ function renderDates(){
   $("#dateHeader").innerHTML=days.map(([label,date],index)=>`<div class="date-cell ${index===0&&$("#showToday").checked?"today":""}"><span>${label}</span><strong>${date+offset}</strong></div>`).join("");
 }
 
+let lastGanttRows=[];
 function renderGantt(){
   const query=$("#searchInput").value.trim().toLowerCase();
   const rows=baseTasks.filter((task)=>(!$("#hideDone").checked||task.status!=="done")&&(!query||`${task.id} ${task.name} ${task.dept}`.toLowerCase().includes(query)));
+  lastGanttRows=rows;
   $("#resultCount").textContent=`${rows.length} งาน`;
   if(!rows.length){
     $("#taskRows").innerHTML='<div class="empty-gantt">ยังไม่มี Job ที่ผ่าน Sales Gate</div>';
     $("#barsArea").innerHTML="";
     return;
   }
-  $("#taskRows").innerHTML=rows.map(task=>`<div class="task-row"><div><strong>${task.dept}</strong><small>${task.id} · ${task.name}</small></div></div>`).join("");
+  $("#taskRows").innerHTML=rows.map((task,i)=>`<div class="task-row" data-task-idx="${i}" title="คลิกเพื่อดูรายละเอียด"><div><strong>${task.dept}</strong><small>${task.id} · ${task.name}</small></div></div>`).join("");
   $("#barsArea").innerHTML=rows.map(task=>`<div class="bar-row"><div class="bar ${task.color}" style="left:${task.start/7*100}%;width:${Math.max((task.end-task.start)/7*100,9)}%">${task.name}</div></div>`).join("");
   if($("#showToday").checked){const line=document.createElement("div");line.className="today-line";line.style.left="18%";$("#barsArea").append(line);}
 }
+
+// รายละเอียดงานเมื่อคลิกแถวในตาราง "รายการงาน" ของแท็บใบวางแผนงาน (เดิมกดแล้วไม่มีอะไรเกิดขึ้นเลย เพราะไม่เคยผูกปุ่มไว้)
+function openJobDetailModal(task){
+  const row=designs.find((d)=>d.id===task.designId);
+  const doc=(typeof SalesEngine!=="undefined"&&SalesEngine.getDocs)?SalesEngine.getDocs().find((x)=>x.designId===task.designId):null;
+  const box=document.createElement("div");
+  box.className="job-detail-modal";
+  box.innerHTML=`<div class="job-detail-card">
+    <div class="job-detail-head"><strong>${tag(task.dept)} ${task.id}</strong><button type="button" class="text-button" data-close-job-detail>ปิด ✕</button></div>
+    <div class="job-detail-body">
+      <div class="pr"><small>งาน</small><strong>${task.name}</strong></div>
+      ${row?`<div class="pr"><small>ลูกค้า</small><strong>${row.customer||"-"}</strong></div>
+      <div class="pr"><small>Project</small><strong>${row.project||"-"}</strong></div>
+      <div class="pr"><small>กำหนดส่ง</small><strong>${row.due||"-"}</strong></div>`:`<div class="pr"><small>หมายเหตุ</small><strong>ไม่พบข้อมูล Design เชื่อมโยง (${task.designId})</strong></div>`}
+      ${doc?`<div class="pr"><small>เลขที่ M/O,S/O</small><strong>${doc.no||"-"}</strong></div>`:""}
+      <div class="pr"><small>สถานะ</small><strong>${task.status==="done"?"เสร็จแล้ว":"กำลังดำเนินการ"}</strong></div>
+    </div>
+    ${row?`<div class="job-detail-actions"><button type="button" class="action-button primary" data-goto-design="1">ไปที่หน้า Design</button></div>`:""}
+  </div>`;
+  document.body.appendChild(box);
+  box.addEventListener("click",(e)=>{
+    if(e.target===box||e.target.closest("[data-close-job-detail]")){box.remove();return;}
+    if(e.target.closest("[data-goto-design]")){box.remove();if(typeof setView==="function")setView("design");}
+  });
+}
+document.addEventListener("keydown",(e)=>{if(e.key==="Escape"){const m=document.querySelector(".job-detail-modal");if(m)m.remove();}});
+$("#taskRows") && $("#taskRows").addEventListener("click",(e)=>{
+  const rowEl=e.target.closest(".task-row");
+  if(!rowEl)return;
+  const task=lastGanttRows[Number(rowEl.dataset.taskIdx)];
+  if(task)openJobDetailModal(task);
+});
 
 $$(".nav-link[data-view]").forEach((button)=>button.addEventListener("click",()=>setView(button.dataset.view)));
 $("#designSearch").addEventListener("input",renderDesign);
@@ -1306,5 +1340,19 @@ $("#importDesignButton").addEventListener("click",()=>{
   $("#importStatus").textContent=`นำเข้าแล้ว ${rows.length} แถว → ${new Set(rows.map(r=>r.id)).size} Design No. (รวมรายการซ้ำระหว่างชีตแล้ว) จากชีต ${sheet==="__ALL__"?"ทุกชีต":sheet}`; toast("นำเข้าตารางทำแบบเรียบร้อย"); renderDesign();
 });
 $$(".view-btn").forEach((button)=>button.addEventListener("click",()=>{$$(".view-btn").forEach(b=>b.classList.remove("active"));button.classList.add("active");toast(`เปลี่ยนมุมมองเป็น ${button.textContent}`);}));
+
+// รูปดีไซน์ (thumbnail) ที่แสดงในหน้าภาพรวม/แผนกต่างๆ — คลิกเพื่อดูขนาดเต็มจอ ใช้ร่วมกันทุกหน้าที่มีรูป
+document.addEventListener("click",(e)=>{
+  const img=e.target.closest(".ovw-thumb,.dept-row-photo,.shp-doc-photo");
+  if(img&&img.src){
+    const box=document.createElement("div");
+    box.className="dept-photo-lightbox";
+    box.innerHTML=`<img src="${img.src}" alt="">`;
+    box.addEventListener("click",()=>box.remove());
+    document.body.appendChild(box);
+    return;
+  }
+  if(e.target.closest(".dept-photo-lightbox")){ /* ปิดจากคลิกพื้นหลัง handled above */ }
+});
 
 setView("design");

@@ -28,6 +28,8 @@
   const KEY_PRESETS = "siam-quality-presets";
   const KEY_WORKERS = "siam-workforce";
   const KEY_PLANS = "siam-planning-worksheets";
+  const KEY_DYE_KPI = "siam-dye-kpi";           // { [designId]: { moNo, rows:[...], importedAt } } — นำเข้าจากรายงาน KPI แผนกย้อม (Dye_KPI.xlsx)
+  const KEY_PLANNING_KPI = "siam-planning-kpi"; // { [designId]: { moNo, rows:[...], importedAt } } — นำเข้าจากรายงาน KPI แผนกวางแผน (Planning_KPI.xlsx ชีต "1.ส่งมอบทั้งหมด ")
   const ANCHOR_DATE = new Date(2026, 8, 21); // จ. 21 ก.ย. 2026 — วันแรกของสัปดาห์ในตาราง Gantt (app.js: const days=[["จ.",21],...])
 
   /* ============================================================
@@ -371,7 +373,7 @@
     if (!opened.length) return `<p class="col-empty">ยังไม่มี Job ที่ฝ่ายขายส่งมา Planning</p>`;
     return `<div class="pw-job-grid">${opened.map((d) => {
       const has_plan = Boolean(plans[d.id] && plans[d.id].savedAt);
-      return `<button type="button" class="pw-job-card ${state.designId === d.id ? "active" : ""}" data-pick="${esc(d.id)}">
+      return `<button type="button" class="pw-job-card dept-planning ${state.designId === d.id ? "active" : ""}" data-pick="${esc(d.id)}">
         <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(d.moNo || "ยังไม่มีเลข M/O")}</small>
         ${tag(has_plan ? "วางแผนแล้ว" : "รอวางแผน", has_plan ? "" : "review")}
       </button>`;
@@ -597,6 +599,186 @@
     <div class="pw-save-bar"><button type="button" class="action-button primary" data-save-plan>บันทึกแผนและส่งเข้า Master Plan Gantt</button>${p.savedAt ? `<small>บันทึกล่าสุด ${new Date(p.savedAt).toLocaleString("th-TH")}</small>` : ""}</div>`;
   }
 
+  /* ============================================================
+     Excel Import — นำเข้ารายงาน KPI แผนกย้อม / แผนกวางแผน (จับคู่ M/O กับ SalesEngine เพื่อหา designId)
+     รูปแบบเดียวกับ weave-floor.js importExcel (normMoKey/findDesignIdByMoNo คัดลอกมาปรับใช้ในไฟล์นี้)
+     ============================================================ */
+  // M/O ในรายงาน KPI (เช่น "M/O 109/26", "M/O TH063/26") ไม่มีเลข 0 นำหน้าเหมือนในหน้ารายงานขาย
+  // (เช่น "0109/26") — ใช้ normalize key แบบเดียวกับตอนนำเข้า Master Plan เพื่อจับคู่ข้ามรูปแบบเหล่านี้ได้
+  function normMoKey(raw) {
+    // ORDER NO./M/O ในรายงาน KPI มักมีคำว่า "M/O " นำหน้าเลขจริง (เช่น "M/O 109/26") ในขณะที่ d.no ในหน้ารายงานขาย
+    // เป็นเลขเปล่า ("0109/26") หรือมีแค่ prefix ตัวอักษร ("TH 128/26") — ตัดคำว่า "M/O" นำหน้าออกก่อนเทียบเสมอ
+    const s = String(raw || "").trim().toUpperCase().replace(/^M\/O\s*/, "");
+    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*\/\s*0*(\d+)/);
+    if (!m) return s.replace(/\s+/g, "");
+    const [, prefix, num2, yy] = m;
+    return `${prefix}|${num2}|${yy}`;
+  }
+  function findDesignIdByMoNo(moNo) {
+    try {
+      if (typeof SalesEngine === "undefined" || !SalesEngine.getDocs) return null;
+      const key = normMoKey(moNo);
+      if (!key) return null;
+      const doc = SalesEngine.getDocs().find((d) => normMoKey(d.no) === key);
+      return doc ? doc.designId : null;
+    } catch (e) { return null; }
+  }
+  function parseDateCell(cell) {
+    if (cell instanceof Date) return cell.toISOString().slice(0, 10);
+    if (typeof cell === "number" && cell > 20000) { const d = XLSX.SSF ? XLSX.SSF.parse_date_code(cell) : null; if (d) return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`; }
+    if (typeof cell === "string" && /^\d{4}-\d{2}-\d{2}/.test(cell)) return cell.slice(0, 10);
+    return "";
+  }
+
+  /* ---------- Feature 1: Dye KPI (Dye_KPI.xlsx ชีต "MO" และ " ย้อมเพิ่ม ") ---------- */
+  async function importDyeKpiExcel(file) {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const DYE_SHEETS = ["MO", " ย้อมเพิ่ม "]; // ต้องตรงเป๊ะรวมช่องว่างนำ/ตาม — ชีตอื่น (เช่น Sheet1 รูปแบบเก่า) ข้ามทิ้ง
+    const store = readJson(KEY_DYE_KPI, {});
+    let imported = 0, skippedNoMatch = 0;
+    const matchedDesigns = new Set(), unmatched = new Set();
+    wb.SheetNames.forEach((sheetName) => {
+      if (DYE_SHEETS.indexOf(sheetName) < 0) return;
+      const isMoSheet = sheetName === "MO";
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "", raw: true });
+      aoa.forEach((row) => {
+        const orderNo = row[1];
+        if (!has(orderNo)) return; // แถวว่าง/หัวตารางที่ไม่มีเลข ORDER NO.
+        if (/order/i.test(String(orderNo))) return; // หัวตาราง "ORDER  NO."
+        const designId = findDesignIdByMoNo(orderNo);
+        if (!designId) { skippedNoMatch++; unmatched.add(String(orderNo)); return; }
+        const rowObj = {
+          colorNo: has(row[2]) ? String(row[2]) : "",
+          colorCode: has(row[3]) ? String(row[3]) : "",
+          yarnType: has(row[4]) ? String(row[4]) : "",
+          lot: has(row[5]) ? String(row[5]) : "",
+          orderedKg: num(row[6]),
+          potNo: has(row[7]) ? String(row[7]) : "",
+          reqKg: num(row[8]),
+          actualKg: num(row[9]),
+          planDue: parseDateCell(row[10]),
+          actualDone: parseDateCell(row[11]),
+          sendDue: isMoSheet ? parseDateCell(row[13]) : parseDateCell(row[12]),
+          onTime: isMoSheet ? (num(row[12]) === 1) : null
+        };
+        if (!store[designId]) store[designId] = { moNo: String(orderNo), rows: [] };
+        if (!store[designId].rows) store[designId].rows = [];
+        store[designId].moNo = store[designId].moNo || String(orderNo);
+        store[designId].rows.push(rowObj);
+        store[designId].importedAt = new Date().toISOString();
+        matchedDesigns.add(designId);
+        imported++;
+      });
+    });
+    writeJson(KEY_DYE_KPI, store);
+    toast(`นำเข้าเสร็จ: บันทึก ${imported} แถว (${matchedDesigns.size} M/O) · ข้าม (ไม่พบ M/O ที่ตรงกัน) ${skippedNoMatch} แถว`);
+    if (unmatched.size) console.warn("[planning dye-kpi import] ไม่พบ M/O ที่ตรงกันในระบบ:", [...unmatched].slice(0, 30));
+  }
+
+  function dyeKpiSummaryRows() {
+    const store = readJson(KEY_DYE_KPI, {});
+    const plans = loadPlans();
+    return Object.keys(store).map((designId) => {
+      const rec = store[designId] || {};
+      const rows = rec.rows || [];
+      const orderedKgSum = rows.reduce((t, r) => t + num(r.orderedKg), 0);
+      const actualKgSum = rows.reduce((t, r) => t + num(r.actualKg), 0);
+      const onTimeCount = rows.filter((r) => r.onTime === true).length;
+      const onTimeKnownCount = rows.filter((r) => r.onTime === true || r.onTime === false).length;
+      const lastDone = rows.reduce((mx, r) => (r.actualDone && r.actualDone > mx ? r.actualDone : mx), "");
+      const moNo = (plans[designId] && plans[designId].moNo) || rec.moNo || designId;
+      return { designId, moNo, colorCount: rows.length, orderedKgSum, actualKgSum, onTimeCount, onTimeKnownCount, lastDone };
+    }).sort((a, b) => String(a.moNo).localeCompare(String(b.moNo), "th"));
+  }
+
+  function renderDyeKpiResults() {
+    const el = $("#pwDyeKpiResults");
+    if (!el) return;
+    const rows = dyeKpiSummaryRows();
+    el.innerHTML = rows.length ? `<div class="table-wrap"><table class="calc-table">
+      <thead><tr><th>M/O</th><th class="num">จำนวนสี</th><th class="num">นน.สั่งย้อมรวม (กก.)</th><th class="num">นน.โอนจริงรวม (กก.)</th><th class="num">ตรงแผน</th><th>วันที่ย้อมเสร็จล่าสุด</th></tr></thead>
+      <tbody>${rows.map((r) => `<tr><td>${esc(r.moNo)}</td><td class="num">${r.colorCount}</td><td class="num">${fmt(r.orderedKgSum, 3)}</td><td class="num">${fmt(r.actualKgSum, 3)}</td><td class="num">${r.onTimeCount} / ${r.onTimeKnownCount}</td><td>${esc(r.lastDone || "-")}</td></tr>`).join("")}</tbody>
+    </table></div>` : `<p class="col-empty">ยังไม่มีข้อมูล KPI แผนกย้อม — นำเข้าไฟล์ Excel ด้านบน</p>`;
+  }
+
+  /* ---------- Feature 2: Planning KPI (Planning_KPI.xlsx ชีต "1.ส่งมอบทั้งหมด ") ---------- */
+  async function importPlanningKpiExcel(file) {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const SHEET_NAME = "1.ส่งมอบทั้งหมด "; // ต้องตรงเป๊ะรวมช่องว่างต่อท้าย — ชีตอื่นในไฟล์ (รายงานเก่าปี 2018/2019, ไหม surplus) ไม่อยู่ในขอบเขตนี้
+    if (wb.SheetNames.indexOf(SHEET_NAME) < 0) { toast(`ไม่พบชีต "${SHEET_NAME}" ในไฟล์นี้`); return; }
+    const store = readJson(KEY_PLANNING_KPI, {});
+    let imported = 0, skippedNoMatch = 0;
+    const matchedDesigns = new Set(), unmatched = new Set();
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[SHEET_NAME], { header: 1, defval: "", raw: true });
+    aoa.forEach((row) => {
+      const moNo = row[1];
+      if (!has(moNo)) return; // แถวว่าง
+      if (String(moNo).trim().toUpperCase() === "M/O") return; // หัวตาราง
+      const designId = findDesignIdByMoNo(moNo);
+      if (!designId) { skippedNoMatch++; unmatched.add(String(moNo)); return; }
+      const docNo = has(row[15]) ? String(row[15]) : (has(row[17]) ? String(row[17]) : "");
+      const rowObj = {
+        receivedDate: parseDateCell(row[0]),
+        customer: has(row[2]) ? String(row[2]) : "",
+        project: has(row[3]) ? String(row[3]) : "",
+        quality: has(row[4]) ? String(row[4]) : "",
+        dueDate: parseDateCell(row[5]),
+        pieceNo: has(row[6]) ? String(row[6]) : "",
+        colorCount: num(row[7]),
+        sqm: num(row[8]),
+        grade: has(row[9]) ? String(row[9]) : "",
+        location: has(row[10]) ? String(row[10]) : "",
+        weaveStart: parseDateCell(row[11]),
+        weaveDone: parseDateCell(row[12]),
+        remaining: num(row[13]),
+        transferDate: parseDateCell(row[14]),
+        docNo,
+        shipDate: parseDateCell(row[16])
+      };
+      if (!store[designId]) store[designId] = { moNo: String(moNo), rows: [] };
+      if (!store[designId].rows) store[designId].rows = [];
+      store[designId].moNo = store[designId].moNo || String(moNo);
+      store[designId].rows.push(rowObj);
+      store[designId].importedAt = new Date().toISOString();
+      matchedDesigns.add(designId);
+      imported++;
+    });
+    writeJson(KEY_PLANNING_KPI, store);
+    toast(`นำเข้าเสร็จ: บันทึก ${imported} แถว (${matchedDesigns.size} M/O) · ข้าม (ไม่พบ M/O ที่ตรงกัน) ${skippedNoMatch} แถว`);
+    if (unmatched.size) console.warn("[planning planning-kpi import] ไม่พบ M/O ที่ตรงกันในระบบ:", [...unmatched].slice(0, 30));
+  }
+
+  function planningKpiSummaryRows() {
+    const store = readJson(KEY_PLANNING_KPI, {});
+    const plans = loadPlans();
+    return Object.keys(store).map((designId) => {
+      const rec = store[designId] || {};
+      const rows = rec.rows || [];
+      const sqmSum = rows.reduce((t, r) => t + num(r.sqm), 0);
+      const customer = rows.length ? rows[0].customer : "";
+      const project = rows.length ? rows[0].project : "";
+      const grade = rows.length ? rows[0].grade : "";
+      const dueDate = rows.length ? rows[0].dueDate : "";
+      const lastWeaveDone = rows.reduce((mx, r) => (r.weaveDone && r.weaveDone > mx ? r.weaveDone : mx), "");
+      let status = "-";
+      if (has(dueDate) && has(lastWeaveDone)) status = lastWeaveDone <= dueDate ? "ตรงเวลา" : "ล่าช้า";
+      const moNo = (plans[designId] && plans[designId].moNo) || rec.moNo || designId;
+      return { designId, moNo, customer, project, sqmSum, grade, dueDate, lastWeaveDone, status };
+    }).sort((a, b) => String(a.moNo).localeCompare(String(b.moNo), "th"));
+  }
+
+  function renderPlanningKpiResults() {
+    const el = $("#pwPlanningKpiResults");
+    if (!el) return;
+    const rows = planningKpiSummaryRows();
+    el.innerHTML = rows.length ? `<div class="table-wrap"><table class="calc-table">
+      <thead><tr><th>M/O</th><th>ลูกค้า</th><th>Project</th><th class="num">พื้นที่รวม (ตร.ม.)</th><th>เกรด</th><th>กำหนดส่ง</th><th>ทอเสร็จล่าสุด</th><th>สถานะ</th></tr></thead>
+      <tbody>${rows.map((r) => `<tr><td>${esc(r.moNo)}</td><td>${esc(r.customer || "-")}</td><td>${esc(r.project || "-")}</td><td class="num">${fmt(r.sqmSum, 2)}</td><td>${esc(r.grade || "-")}</td><td>${esc(r.dueDate || "-")}</td><td>${esc(r.lastWeaveDone || "-")}</td><td>${r.status === "ล่าช้า" ? `<span class="status-tag blocked">${esc(r.status)}</span>` : r.status === "ตรงเวลา" ? `<span class="status-tag">${esc(r.status)}</span>` : "-"}</td></tr>`).join("")}</tbody>
+    </table></div>` : `<p class="col-empty">ยังไม่มีข้อมูล KPI แผนกวางแผน — นำเข้าไฟล์ Excel ด้านบน</p>`;
+  }
+
   function build() {
     const root = $("#planworkView");
     root.innerHTML = `
@@ -611,12 +793,26 @@
         <div class="panel-heading"><div><strong>เลือก Job ที่ฝ่ายขายส่งมา</strong><small>คลิกเพื่อเปิด/แก้ไขใบวางแผนงาน</small></div></div>
         <div class="pw-body" id="pwJobPicker"></div>
       </section>
+      <section class="department-panel pw-card wide">
+        <div class="panel-heading"><div><strong>นำเข้ารายงาน KPI แผนกย้อม (Dye)</strong><small>นำเข้าไฟล์ Excel รายงาน KPI แผนกย้อม (อ่านเฉพาะชีต "MO" และ " ย้อมเพิ่ม ") — จับคู่กับ M/O ในระบบอัตโนมัติ</small></div></div>
+        <div class="pw-body">
+          <div class="pw-row"><label class="file-picker">นำเข้าจาก Excel<input type="file" id="pwDyeKpiFile" accept=".xlsx,.xls" data-import-dye-kpi></label></div>
+          <div id="pwDyeKpiResults"></div>
+        </div>
+      </section>
+      <section class="department-panel pw-card wide">
+        <div class="panel-heading"><div><strong>นำเข้ารายงาน KPI แผนกวางแผน (ส่งมอบ)</strong><small>นำเข้าไฟล์ Excel รายงาน KPI แผนกวางแผน (อ่านเฉพาะชีต "1.ส่งมอบทั้งหมด ") — จับคู่กับ M/O ในระบบอัตโนมัติ</small></div></div>
+        <div class="pw-body">
+          <div class="pw-row"><label class="file-picker">นำเข้าจาก Excel<input type="file" id="pwPlanningKpiFile" accept=".xlsx,.xls" data-import-planning-kpi></label></div>
+          <div id="pwPlanningKpiResults"></div>
+        </div>
+      </section>
       <div id="pwForm"></div>`;
   }
 
   function renderJobPicker() { $("#pwJobPicker").innerHTML = jobPickerHtml(); }
   function renderForm() { $("#pwForm").innerHTML = state.plan ? buildForm() : `<p class="col-empty">เลือก Job ด้านบนเพื่อเริ่มวางแผน</p>`; }
-  function renderAll() { renderJobPicker(); renderForm(); }
+  function renderAll() { renderJobPicker(); renderDyeKpiResults(); renderPlanningKpiResults(); renderForm(); }
 
   function pickJob(id) {
     state.designId = id;
@@ -713,6 +909,16 @@
       if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-shared-workers")) {
         const file = e.target.files && e.target.files[0];
         if (file) importSharedWorkersExcel(file).then(() => { renderForm(); e.target.value = ""; });
+        return;
+      }
+      if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-dye-kpi")) {
+        const file = e.target.files && e.target.files[0];
+        if (file) importDyeKpiExcel(file).then(() => { renderDyeKpiResults(); e.target.value = ""; });
+        return;
+      }
+      if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-planning-kpi")) {
+        const file = e.target.files && e.target.files[0];
+        if (file) importPlanningKpiExcel(file).then(() => { renderPlanningKpiResults(); e.target.value = ""; });
         return;
       }
       if (!state.plan) return;

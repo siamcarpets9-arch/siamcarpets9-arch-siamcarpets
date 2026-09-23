@@ -51,6 +51,21 @@
 
   function docLabel(d) { return `${d.type === "SO" ? "SO " : "M/O "}${d.no}`; }
 
+  // รูปดีไซน์ — ดึงจากรูปแบบพรมที่แนบไว้ในหน้าแผนกทอ (ผูกกับ designId ของ M/O/SO นั้น ไม่ใช่ docId ของใบส่ง)
+  const designPhotoCache = {};
+  function designPhoto(docId) {
+    if (designPhotoCache[docId] !== undefined) return designPhotoCache[docId];
+    const se = SE();
+    const WF = window.WeaveFloorEngine;
+    let photo = "";
+    try {
+      const doc = se && typeof se.getDocs === "function" ? se.getDocs().find((d) => d.id === docId) : null;
+      if (doc && doc.designId && WF && typeof WF.getDesignImage === "function") photo = WF.getDesignImage(doc.designId) || "";
+    } catch (e) { photo = ""; }
+    designPhotoCache[docId] = photo;
+    return photo;
+  }
+
   function allSalesDocs() {
     const se = SE();
     if (!se || typeof se.getDocs !== "function") return [];
@@ -119,10 +134,12 @@
      ============================================================ */
   function linesTableHtml(ship) {
     if (!ship.lines.length) return `<p class="col-empty shp-tight">ยังไม่มีรายการ — ค้นหาแล้วเพิ่ม M/O หรือ SO ด้านบน</p>`;
+    // เลขที่ M/O/SO แสดงแค่ตัวเลขเฉยๆ (ไม่ใส่คำว่า "M/O"/"SO" นำหน้าซ้ำกับหัวคอลัมน์ที่มีป้ายประเภทแยกให้อยู่แล้ว)
     return `<div class="table-wrap"><table class="shp-table">
-      <thead><tr><th>M/O / SO</th><th>ลูกค้า</th><th>MARKS</th><th>MEASURMENT</th><th>NOTE</th><th>ROLL NO.</th><th></th></tr></thead>
+      <thead><tr><th>รูป</th><th>M/O / SO</th><th>ลูกค้า</th><th>MARKS</th><th>MEASURMENT</th><th>NOTE</th><th>ROLL NO.</th><th></th></tr></thead>
       <tbody>${ship.lines.map((l) => `<tr>
-        <td><b>${esc(docLabel(l))}</b><br><small>${esc(MARKET_LABEL[l.market] || l.market)}</small></td>
+        <td>${designPhoto(l.docId) ? `<img class="dept-row-photo" src="${designPhoto(l.docId)}" alt="">` : `<span class="dept-row-photo-empty">-</span>`}</td>
+        <td><span class="ovw-type ovw-type-${l.type}">${esc(l.type)}</span> <b>${esc(l.no)}</b><br><small>${esc(MARKET_LABEL[l.market] || l.market)}</small></td>
         <td>${esc(l.customer)}<br><small>${esc(l.project)}</small></td>
         <td><input data-ship-line="marks" data-line-id="${esc(l.id)}" value="${esc(l.marks)}" placeholder="ชื่อห้อง/ตำแหน่งที่ระบุบนป้าย"></td>
         <td><input data-ship-line="measurement" data-line-id="${esc(l.id)}" value="${esc(l.measurement)}" placeholder="เช่น 50X87 CM."></td>
@@ -234,6 +251,7 @@
      ============================================================ */
   function buildDeliveryNoteHtml(ship) {
     const rows = ship.lines.map((l) => `<tr>
+      <td>${designPhoto(l.docId) ? `<img class="shp-doc-photo dept-row-photo" src="${designPhoto(l.docId)}" alt="">` : ""}</td>
       <td>${esc(ship.invoiceNo || "-")}</td>
       <td>${esc(l.customer)}</td>
       <td>${esc(rollRangeForLine(ship, l.id))}</td>
@@ -254,8 +272,8 @@
       </div>
       <div class="shp-doc-consignee"><b>CONSIGNEE:</b> ${esc(ship.consigneeName || "-")}<br>${nl2br(ship.consigneeAddress || "")}</div>
       <table class="shp-doc-table">
-        <thead><tr><th>INV. NO.</th><th>CUSTOMER</th><th>ROLL NO.</th><th>M/O</th><th>MARKS</th><th>MEASURMENT</th><th>NOTE</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="7" style="text-align:center;color:#888">ยังไม่มีรายการ</td></tr>`}</tbody>
+        <thead><tr><th>รูป</th><th>INV. NO.</th><th>CUSTOMER</th><th>ROLL NO.</th><th>M/O</th><th>MARKS</th><th>MEASURMENT</th><th>NOTE</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="8" style="text-align:center;color:#888">ยังไม่มีรายการ</td></tr>`}</tbody>
       </table>
       ${ship.packingNote ? `<p class="shp-pack-note">หมายเหตุการแพ็ค: ${esc(ship.packingNote)}${ship.shipDate ? ` / พาเลทส่งวันที่ ${new Date(ship.shipDate).toLocaleDateString("th-TH")}` : ""}</p>` : ""}
     </div>`;
@@ -267,8 +285,10 @@
       const line = ship.lines.find((l) => l.id === c.lineId);
       const sizeLine = has(c.pieceRange) || has(c.sizeDim)
         ? `<div>SIZE: ${esc(c.pieceRange)}${has(c.pieceRange) && has(c.sizeDim) ? " :" : ""}${has(c.sizeDim) ? "DIM:" + esc(c.sizeDim) : ""}</div>` : "";
+      const photo = line ? designPhoto(line.docId) : "";
       return `<div class="shp-label-page"><div class="shp-label">
         <div class="shp-label-top"><b>MARKS &amp; NOS</b><span>HANDLE WITH CARE</span></div>
+        ${photo ? `<img class="shp-label-photo" src="${photo}" alt="">` : ""}
         <div class="shp-label-consignee">${esc(ship.consigneeName || "-")}<br>${nl2br(ship.consigneeAddress || "")}</div>
         <div class="shp-label-no">NO.${i + 1}</div>
         <div>MADE IN THAILAND</div>

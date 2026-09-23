@@ -177,7 +177,7 @@
   function pieceJobPickerHtml() {
     const refs = readyFinishPieces();
     if (!refs.length) return `<p class="col-empty">ยังไม่มีชิ้นที่โอนจากแผนกทอ — ต้องทอครบ 100% แล้วกด “โอนให้แผนกทากาวตกแต่ง” ที่หน้า “แผนกทอ → หน้าจอทอ (ภาพรวม)” ก่อน</p>`;
-    return `<div class="pw-job-grid">${refs.map((r) => `<button type="button" class="pw-job-card ${state.designId === r.designId && state.lineIdx == r.lineIdx ? "active" : ""}" data-fnpick-design="${esc(r.designId)}" data-fnpick-line="${esc(r.lineIdx)}">
+    return `<div class="pw-job-grid">${refs.map((r) => `<button type="button" class="pw-job-card dept-finishing ${state.designId === r.designId && state.lineIdx == r.lineIdx ? "active" : ""}" data-fnpick-design="${esc(r.designId)}" data-fnpick-line="${esc(r.lineIdx)}">
       <strong>${esc(r.plan.moNo || r.designId)}</strong><span>${esc(r.line.location || `ชิ้นที่ ${Number(r.lineIdx) + 1}`)}</span><small>จอ ${esc(r.weavePiece.loomNo || "-")} · โอนแล้ว ${new Date(r.weavePiece.transferredToGlueAt).toLocaleDateString("th-TH")}</small>
     </button>`).join("")}</div>`;
   }
@@ -418,6 +418,171 @@
   }
 
   /* ============================================================
+     นำเข้ารายงาน KPI จาก Excel (ประสิทธิภาพตกแต่ง / การเบิกใช้กาว)
+     จับคู่ M/O กับ SalesEngine เพื่อหา designId — ใช้แนวทางเดียวกับ weave-floor.js importExcel
+     ============================================================ */
+  const KEY_FIN_PRODUCTIVITY_KPI = "siam-finishing-kpi"; // { [designId]: { moNo, rows:[{grade,areaSqm,hours,productivity,sheet}], importedAt } }
+  const KEY_FIN_GLUE_KPI = "siam-glue-kpi";              // { [designId]: { moNo, rows:[{date,area,stdKg,eur178,g66012,th31,totalKg,pct}], importedAt } }
+
+  // ไฟล์ KPI บางไฟล์เขียน M/O เต็มรูปแบบ "M/O 109/26" / "S/O 12/26" (มีเครื่องหมาย / ต่อท้ายคำนำหน้า)
+  // ซึ่งทำให้ regex ของ normMoKey จับ "M" เป็น prefix ตัวอักษรแล้วคาดว่าตัวถัดไปเป็นตัวเลข แต่เจอ "/" แทน จึงจับคู่ไม่ได้
+  // ต้องตัดคำนำหน้า "M/O "/"S/O " ออกก่อนเสมอ
+  function normMoKey(raw) {
+    const s = String(raw || "").replace(/^[MS]\/O\s*/i, "").trim().toUpperCase();
+    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*\/\s*0*(\d+)/);
+    if (!m) return s.replace(/\s+/g, "");
+    const [, prefix, num2, yy] = m;
+    return `${prefix}|${num2}|${yy}`;
+  }
+  function findDesignIdByMoNo(moNo) {
+    try {
+      if (typeof SalesEngine === "undefined" || !SalesEngine.getDocs) return null;
+      const key = normMoKey(moNo);
+      if (!key) return null;
+      const doc = SalesEngine.getDocs().find((d) => normMoKey(d.no) === key);
+      return doc ? doc.designId : null;
+    } catch (e) { return null; }
+  }
+
+  /* ---------------- KPI ประสิทธิภาพตกแต่ง (Finishing_KPI.xlsx) ----------------
+     แต่ละชีต: แถวหนึ่งมีป้ายกลุ่มเกรด ("เกรด A  (1.00)" ฯลฯ) ทุก 4 คอลัมน์ ตามด้วยแถวหัวคอลัมน์
+     (M/O, พ.ท แต่งได้(ตร.ม), เวลา (ชม.), Productivity (m2/m/hr)) แล้วข้อมูลเริ่มแถวถัดไป
+     หาแถวป้ายกลุ่มเกรดแบบไดนามิก (ไม่ fix แถวตายตัว) เพราะไฟล์จริงมีแถวหัวเรื่อง/ประจำเดือนคั่นก่อนหน้าด้วย */
+  function findFinKpiGradeHeaderRow(aoa) {
+    for (let r = 0; r < Math.min(aoa.length, 6); r++) {
+      const row = aoa[r] || [];
+      if (row.some((c) => /เกรด\s*[A-Za-z0-9]+/i.test(String(c == null ? "" : c)))) return r;
+    }
+    return -1;
+  }
+  async function importFinProductivityKpiExcel(file) {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const all = readJson(KEY_FIN_PRODUCTIVITY_KPI, {});
+    let imported = 0, skippedNoMatch = 0;
+    const matchedDesigns = new Set();
+    const unmatched = new Set();
+    wb.SheetNames.forEach((sheetName) => {
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "", raw: true });
+      const gradeRowIdx = findFinKpiGradeHeaderRow(aoa);
+      if (gradeRowIdx < 0) return; // ชีตนี้ไม่ตรงรูปแบบรายงาน KPI ตกแต่ง — ข้าม
+      const gradeRow = aoa[gradeRowIdx] || [];
+      const blocks = [];
+      gradeRow.forEach((cell, c) => {
+        const m = /เกรด\s*([A-Za-z0-9]+)/i.exec(String(cell == null ? "" : cell));
+        if (m) blocks.push({ offset: c, grade: m[1].toUpperCase() });
+      });
+      const dataStart = gradeRowIdx + 2; // ข้ามแถวป้ายเกรด + แถวหัวคอลัมน์ (M/O, พ.ท..., เวลา, Productivity)
+      for (let r = dataStart; r < aoa.length; r++) {
+        const row = aoa[r] || [];
+        blocks.forEach((b) => {
+          const moRaw = row[b.offset];
+          if (!has(moRaw)) return; // ข้ามช่องว่างของบล็อกเกรดนี้ในแถวนี้
+          const areaSqm = num(row[b.offset + 1]);
+          const hours = num(row[b.offset + 2]);
+          const productivity = num(row[b.offset + 3]);
+          const designId = findDesignIdByMoNo(moRaw);
+          if (!designId) { skippedNoMatch++; unmatched.add(String(moRaw)); return; }
+          if (!all[designId]) all[designId] = { moNo: String(moRaw), rows: [] };
+          all[designId].rows.push({ grade: b.grade, areaSqm, hours, productivity, sheet: sheetName });
+          all[designId].importedAt = new Date().toISOString();
+          matchedDesigns.add(designId);
+          imported++;
+        });
+      }
+    });
+    writeJson(KEY_FIN_PRODUCTIVITY_KPI, all);
+    toast(`นำเข้าเสร็จ: บันทึก ${imported} แถว (${matchedDesigns.size} M/O) · ข้าม (ไม่พบ M/O ที่ตรงกัน) ${skippedNoMatch} แถว`);
+    if (unmatched.size) console.warn("[finishing productivity kpi import] ไม่พบ M/O ที่ตรงกันในระบบ:", [...unmatched].slice(0, 30));
+  }
+  function finProductivityKpiResultsHtml() {
+    const all = readJson(KEY_FIN_PRODUCTIVITY_KPI, {});
+    const ids = Object.keys(all);
+    if (!ids.length) return `<p class="col-empty">ยังไม่มีข้อมูลนำเข้า — เลือกไฟล์ Excel รายงาน KPI ประสิทธิภาพตกแต่งด้านบน</p>`;
+    const lines = [];
+    ids.forEach((designId) => {
+      const rec = all[designId];
+      const byGrade = {};
+      (rec.rows || []).forEach((r) => { if (!byGrade[r.grade]) byGrade[r.grade] = []; byGrade[r.grade].push(r); });
+      Object.keys(byGrade).sort().forEach((grade) => {
+        const rs = byGrade[grade];
+        const areaSum = rs.reduce((s, r) => s + num(r.areaSqm), 0);
+        const hoursSum = rs.reduce((s, r) => s + num(r.hours), 0);
+        const prodAvg = rs.length ? rs.reduce((s, r) => s + num(r.productivity), 0) / rs.length : 0;
+        lines.push(`<tr><td>${esc(rec.moNo || designId)}</td><td>${esc(grade)}</td><td class="num">${fmt(areaSum, 2)}</td><td class="num">${fmt(hoursSum, 1)}</td><td class="num">${fmt(prodAvg, 3)}</td></tr>`);
+      });
+    });
+    return `<table class="calc-table"><thead><tr><th>M/O</th><th>เกรด</th><th class="num">พื้นที่ตกแต่งรวม(ตร.ม.)</th><th class="num">ชั่วโมงรวม</th><th class="num">Productivity เฉลี่ย</th></tr></thead><tbody>${lines.join("")}</tbody></table>`;
+  }
+
+  /* ---------------- KPI การเบิกใช้กาว (Taakao_KPI.xlsx, ชีต "การเบิกใช้กาว") ----------------
+     แถวหัวเรื่อง/คำเตือน → แถว "ประจำเดือน" + วันที่ → แถวหัวคอลัมน์ (มีคำว่า "M/O") → แถวชนิดกาวย่อย → ข้อมูล
+     คอลัมน์: 0 ลำดับ, 1 ว.ด.ป., 2 M/O No., 3 พื้นที่, 4 จ.น.เบิกตามมาตรฐาน(กก.), 5 กาว EUR178, 6 กาว 66012,
+     7 กาว TH31, 8 รวมเบิกกาว(กก.), 9 %การเบิกกาวจริง — หาแถวหัวคอลัมน์แบบไดนามิกจากคำว่า "M/O" กันเผื่อแถวหัวเรื่องเปลี่ยน */
+  function findFinGlueHeaderRow(aoa) {
+    for (let r = 0; r < Math.min(aoa.length, 8); r++) {
+      const row = aoa[r] || [];
+      if (row.some((c) => /M\/O/i.test(String(c == null ? "" : c)))) return r;
+    }
+    return -1;
+  }
+  async function importFinGlueKpiExcel(file) {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const sheetName = wb.SheetNames.find((sn) => /เบิกใช้กาว/.test(sn)) || wb.SheetNames[0];
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "", raw: true });
+    const headerRowIdx = findFinGlueHeaderRow(aoa);
+    const dataStart = headerRowIdx >= 0 ? headerRowIdx + 2 : 4; // ข้ามแถวหัวคอลัมน์ + แถวชนิดกาวย่อย
+    const all = readJson(KEY_FIN_GLUE_KPI, {});
+    let imported = 0, skippedNoMatch = 0;
+    const matchedDesigns = new Set();
+    const unmatched = new Set();
+    for (let r = dataStart; r < aoa.length; r++) {
+      const row = aoa[r] || [];
+      const moRaw = row[2];
+      if (!has(moRaw)) continue;
+      const dateCell = row[1];
+      let iso = "";
+      if (dateCell instanceof Date) iso = dateCell.toISOString().slice(0, 10);
+      else if (typeof dateCell === "number" && dateCell > 20000 && XLSX.SSF) { const d = XLSX.SSF.parse_date_code(dateCell); if (d) iso = `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`; }
+      else if (has(dateCell)) iso = String(dateCell);
+      const area = num(row[3]);
+      const stdKg = num(row[4]);
+      const eur178 = num(row[5]);
+      const g66012 = num(row[6]);
+      const th31 = num(row[7]);
+      const totalKg = num(row[8]);
+      const pct = num(row[9]);
+      const designId = findDesignIdByMoNo(moRaw);
+      if (!designId) { skippedNoMatch++; unmatched.add(String(moRaw)); continue; }
+      if (!all[designId]) all[designId] = { moNo: String(moRaw), rows: [] };
+      all[designId].rows.push({ date: iso, area, stdKg, eur178, g66012, th31, totalKg, pct });
+      all[designId].importedAt = new Date().toISOString();
+      matchedDesigns.add(designId);
+      imported++;
+    }
+    writeJson(KEY_FIN_GLUE_KPI, all);
+    toast(`นำเข้าทากาวเสร็จ: บันทึก ${imported} แถว (${matchedDesigns.size} M/O) · ข้าม (ไม่พบ M/O ที่ตรงกัน) ${skippedNoMatch} แถว`);
+    if (unmatched.size) console.warn("[finishing glue kpi import] ไม่พบ M/O ที่ตรงกันในระบบ:", [...unmatched].slice(0, 30));
+  }
+  function finGlueKpiResultsHtml() {
+    const all = readJson(KEY_FIN_GLUE_KPI, {});
+    const ids = Object.keys(all);
+    if (!ids.length) return `<p class="col-empty">ยังไม่มีข้อมูลนำเข้า — เลือกไฟล์ Excel รายงาน KPI การเบิกใช้กาวด้านบน</p>`;
+    const rows = ids.map((designId) => {
+      const rec = all[designId];
+      const rs = rec.rows || [];
+      const lastDate = rs.map((r) => r.date).filter(Boolean).sort().slice(-1)[0] || "";
+      const areaSum = rs.reduce((s, r) => s + num(r.area), 0);
+      const stdSum = rs.reduce((s, r) => s + num(r.stdKg), 0);
+      const totalSum = rs.reduce((s, r) => s + num(r.totalKg), 0);
+      const pctAvg = rs.length ? rs.reduce((s, r) => s + num(r.pct), 0) / rs.length : 0;
+      return `<tr><td>${esc(rec.moNo || designId)}</td><td>${lastDate ? thaiDate(lastDate) : "-"}</td><td class="num">${fmt(areaSum, 2)}</td><td class="num">${fmt(stdSum, 2)}</td><td class="num">${fmt(totalSum, 2)}</td><td class="num">${fmt(pctAvg, 1)}%</td></tr>`;
+    }).join("");
+    return `<table class="calc-table"><thead><tr><th>M/O</th><th>วันที่เบิกล่าสุด</th><th class="num">พื้นที่รวม</th><th class="num">มาตรฐานรวม(กก.)</th><th class="num">เบิกจริงรวม(กก.)</th><th class="num">%เฉลี่ย</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  /* ============================================================
      Render / Bind
      ============================================================ */
   function build() {
@@ -432,7 +597,27 @@
         <div class="panel-heading"><div><strong>เลือกชิ้นที่โอนจากแผนกทอ</strong></div></div>
         <div class="pw-body" id="fnJobPicker"></div>
       </section>
-      <div id="fnTabBody"></div>`;
+      <div id="fnTabBody"></div>
+
+      <section class="department-panel pw-card wide">
+        <div class="panel-heading"><div><strong>นำเข้ารายงาน KPI ประสิทธิภาพตกแต่ง</strong><small>นำเข้าไฟล์ Excel รายงาน % ประสิทธิภาพการตกแต่งพรม (แยกตามเกรด A-X) — จับคู่ M/O กับข้อมูลในระบบนี้อัตโนมัติ ประมวลผลทุกชีตในไฟล์</small></div></div>
+        <div class="pw-body">
+          <div class="pw-row">
+            <label class="file-picker">นำเข้าจาก Excel<input type="file" id="finProductivityKpiFile" accept=".xlsx,.xls" data-import-fin-productivity-kpi></label>
+          </div>
+          <div id="finProductivityKpiResults"></div>
+        </div>
+      </section>
+
+      <section class="department-panel pw-card wide">
+        <div class="panel-heading"><div><strong>นำเข้ารายงาน KPI การเบิกใช้กาว</strong><small>นำเข้าไฟล์ Excel รายงานการเบิกใช้กาว (ชีต "การเบิกใช้กาว") — จับคู่ M/O กับข้อมูลในระบบนี้อัตโนมัติ</small></div></div>
+        <div class="pw-body">
+          <div class="pw-row">
+            <label class="file-picker">นำเข้าจาก Excel<input type="file" id="finGlueKpiFile" accept=".xlsx,.xls" data-import-fin-glue-kpi></label>
+          </div>
+          <div id="finGlueKpiResults"></div>
+        </div>
+      </section>`;
   }
 
   function renderAll() {
@@ -446,6 +631,8 @@
     else if (state.tab === "cost") html = costTabHtml();
     $("#fnTabBody").innerHTML = html;
     $$(".view-btn[data-fntab]").forEach((b) => b.classList.toggle("active", b.dataset.fntab === state.tab));
+    $("#finProductivityKpiResults").innerHTML = finProductivityKpiResultsHtml();
+    $("#finGlueKpiResults").innerHTML = finGlueKpiResultsHtml();
   }
 
   let built = false;
@@ -530,6 +717,16 @@
       if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-finworkers")) {
         const file = e.target.files && e.target.files[0];
         if (file) importFinWorkersExcel(file).then(() => { renderAll(); e.target.value = ""; });
+        return;
+      }
+      if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-fin-productivity-kpi")) {
+        const file = e.target.files && e.target.files[0];
+        if (file) importFinProductivityKpiExcel(file).then(() => { renderAll(); e.target.value = ""; });
+        return;
+      }
+      if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-fin-glue-kpi")) {
+        const file = e.target.files && e.target.files[0];
+        if (file) importFinGlueKpiExcel(file).then(() => { renderAll(); e.target.value = ""; });
         return;
       }
       const ff = e.target.closest("[data-ff]");

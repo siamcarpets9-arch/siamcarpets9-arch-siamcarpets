@@ -86,7 +86,7 @@
 
 /* หน้าจอทอ (ภาพรวม) — การ์ดต่อจอทอ */
 .wfb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
-.wfb-card{background:#fff;border:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:8px}
+.wfb-card{background:#fff;border:1px solid var(--line);border-left:4px solid #13848a;padding:12px;display:flex;flex-direction:column;gap:8px}
 .wfb-head{display:flex;gap:10px;align-items:flex-start}
 .wfb-loom{flex-shrink:0;min-width:52px;padding:6px 8px;background:#f0f6f5;border:1px solid var(--line);text-align:center}
 .wfb-loom small{display:block;color:var(--muted);font-size:8px;font-weight:900}
@@ -117,3 +117,11 @@
   .pw-row{flex-direction:column;align-items:stretch}
   .pf,.pr{width:100%}
 }
+.pw-job-card{border-left-width:4px;border-left-style:solid}
+.pw-job-card.dept-planning{border-left-color:#c79735}
+.pw-job-card.dept-pattern{border-left-color:#4e7fa4}
+.pw-job-card.dept-dyeing{border-left-color:#9876b4}
+.pw-job-card.dept-weaveissue{border-left-color:#6f9bb0}
+.pw-job-card.dept-weaving{border-left-color:#13848a}
+.pw-job-card.dept-finishing{border-left-color:#d39a2f}
+.pw-job-card.dept-done{border-left-color:#438b79}

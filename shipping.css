@@ -79,3 +79,5 @@
 }
 @media(max-width:900px){.shp-head-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:560px){.shp-head-grid{grid-template-columns:1fr}.shp-grid{grid-template-columns:1fr}}
+.shp-doc-photo{width:32px;height:32px;object-fit:cover;border-radius:3px}
+.shp-label-photo{max-width:140px;max-height:100px;object-fit:contain;margin:6px 0;border:1px solid #111}

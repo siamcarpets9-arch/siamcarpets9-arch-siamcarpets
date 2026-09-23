@@ -90,7 +90,7 @@
     const plans = PE() ? PE().readJson(PE().KEY_PLANS, {}) : {};
     const ready = designs.filter((d) => d.job === "OPENED" && plans[d.id] && plans[d.id].savedAt);
     if (!ready.length) return `<p class="col-empty">ยังไม่มี Job ที่ Planning บันทึกแผน (ทำใบวางแผนงานให้เสร็จก่อน)</p>`;
-    return `<div class="pw-job-grid">${ready.map((d) => `<button type="button" class="pw-job-card ${state.designId === d.id ? "active" : ""}" data-wpick="${esc(d.id)}">
+    return `<div class="pw-job-grid">${ready.map((d) => `<button type="button" class="pw-job-card dept-weaveissue ${state.designId === d.id ? "active" : ""}" data-wpick="${esc(d.id)}">
       <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
     </button>`).join("")}</div>`;
   }

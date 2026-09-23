@@ -246,6 +246,17 @@
     return [...set].sort();
   }
 
+  // ดึงรูปแบบพรม (patternImage) ที่แนบไว้ในหน้าแผนกทอสำหรับ M/O,S/O นี้ — ใช้แสดงรูปดีไซน์ในหน้าภาพรวม/ใบส่งของ
+  // (ยังไม่มีช่องเก็บรูปต่อดีไซน์โดยตรงในระบบ จึงดึงจากรูปที่ช่างทอแนบไว้ต่อชิ้น/ล็อกการทอแทน — คืนรูปแรกที่พบ)
+  function getDesignImage(designId) {
+    try {
+      const dfloor = loadFloorAll()[designId];
+      if (!dfloor || !dfloor.pieces) return "";
+      const rec = Object.values(dfloor.pieces).find((p) => p && p.patternImage);
+      return rec ? rec.patternImage : "";
+    } catch (e) { return ""; }
+  }
+
   window.WeaveFloorEngine = {
     KEY_FLOOR, KEY_YARN_REQ, KEY_QC, KEY_NOTIFY, QC_RESULTS,
     loadFloorAll, ensureDesignFloor, saveDesignFloor, ensurePieceRec, ensureDayRec,
@@ -254,7 +265,7 @@
     loadYarnRequests, saveYarnRequests, addYarnRequest, updateYarnRequest, pendingYarnRequests,
     loadQc, saveQc, addQc, loadNotify, saveNotify, logNotify,
     planFor, dyePlanOf, moDocOf, issueRecOf, loadWeaveWorkers, linesOf, suggestedGradeFor,
-    readyDesigns, allPieceRefs, daySummary, allLoggedDates, readJson, writeJson
+    readyDesigns, allPieceRefs, daySummary, allLoggedDates, readJson, writeJson, getDesignImage
   };
 
   /* ============================================================
@@ -277,7 +288,7 @@
     const ready = readyDesigns();
     if (!ready.length) return `<p class="col-empty">ยังไม่มี M/O ที่ผ้าใบพร้อม (ต้องติ๊ก “ผ้าใบสำหรับทอพร้อมแล้ว” ในหน้า “ส่งแผนกทอ” ก่อน — ไม่ต้องรอไหมครบทุกสี)</p>`;
     const plans = PE().readJson(PE().KEY_PLANS, {});
-    return `<div class="pw-job-grid">${ready.map((d) => `<button type="button" class="pw-job-card ${state.designId === d.id ? "active" : ""}" data-${pickAttr}="${esc(d.id)}">
+    return `<div class="pw-job-grid">${ready.map((d) => `<button type="button" class="pw-job-card dept-weaving ${state.designId === d.id ? "active" : ""}" data-${pickAttr}="${esc(d.id)}">
       <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
     </button>`).join("")}</div>`;
   }

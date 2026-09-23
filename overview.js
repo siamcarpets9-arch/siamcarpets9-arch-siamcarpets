@@ -63,6 +63,12 @@
     return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(0, 10);
   }
 
+  // รูปดีไซน์ต่อ M/O,S/O — ดึงจากรูปแบบพรมที่แนบไว้ในหน้าแผนกทอ (ยังไม่มีช่องเก็บรูปต่อดีไซน์โดยตรงในระบบ)
+  function designPhoto(id) {
+    const WF = window.WeaveFloorEngine;
+    return WF && typeof WF.getDesignImage === "function" ? WF.getDesignImage(id) : "";
+  }
+
   /* ---------- พื้นที่ (ตร.ม.) รวมของงาน — ใช้เอกสารฝ่ายขาย (บรรทัดสินค้าจริง) เป็นหลัก ---------- */
   function sqmOfDesign(id) {
     const SE = window.SalesEngine;
@@ -327,7 +333,9 @@
       .sort((a, b) => (a.st.state === "active" ? -1 : 1) - (b.st.state === "active" ? -1 : 1))
       .map(({ d, st, type }) => {
         const meta = DEPTS[st.dept] || DEPTS.planning;
-        return `<tr>
+        const photo = designPhoto(d.id);
+        return `<tr style="border-left:3px solid ${meta.color}">
+          <td>${photo ? `<img class="ovw-thumb" src="${photo}" alt="">` : `<span class="ovw-thumb ovw-thumb-empty">-</span>`}</td>
           <td><span class="ovw-type ovw-type-${type}">${type}</span></td>
           <td><strong>${esc(d.id)}</strong><small>${esc(d.market === "DOMESTIC" ? "ในประเทศ" : d.market === "FOREIGN" ? "ต่างประเทศ" : "")}</small></td>
           <td>${esc(d.customer || "-")}</td>
@@ -395,8 +403,8 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>ประเภท</th><th>เลขที่</th><th>ลูกค้า</th><th>Project / PO</th><th>กำหนดส่ง</th><th>แผนกปัจจุบัน</th><th>ที่ทอ</th><th>สถานะ</th><th></th></tr></thead>
-            <tbody>${tableRows || `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">ไม่พบรายการที่ตรงกับตัวกรอง</td></tr>`}</tbody>
+            <thead><tr><th>รูป</th><th>ประเภท</th><th>เลขที่</th><th>ลูกค้า</th><th>Project / PO</th><th>กำหนดส่ง</th><th>แผนกปัจจุบัน</th><th>ที่ทอ</th><th>สถานะ</th><th></th></tr></thead>
+            <tbody>${tableRows || `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">ไม่พบรายการที่ตรงกับตัวกรอง</td></tr>`}</tbody>
           </table>
         </div>
       </section>
