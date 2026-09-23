@@ -1,0 +1,90 @@
+/* โค้ดสไตล์เฉพาะ ใบวางแผนงาน (Planning Worksheet) — ใช้ตัวแปรสี/คลาสร่วมกับ styles.css, calc.css */
+#planworkView .col-empty,#patternView .col-empty{padding:16px;text-align:center;color:var(--muted);font-size:11px}
+.pw-card{margin-bottom:10px}
+.pw-card.wide{grid-column:1/-1}
+.pw-card .panel-heading{align-items:flex-start}
+.pw-body{padding:12px 14px}
+.pw-row{display:flex;flex-wrap:wrap;gap:9px 12px;align-items:flex-end;margin-bottom:8px}
+.pw-row:last-child{margin-bottom:0}
+.pw-res-row{display:flex;flex-wrap:wrap;gap:8px}
+
+.pf{display:grid;gap:4px;color:var(--muted);font-size:9px;font-weight:900}
+.pf input,.pf select{padding:7px 8px;border:1px solid var(--line);font:inherit;font-size:11px;background:#fff;color:var(--ink);min-width:110px}
+.pf.tiny input{width:70px;min-width:0}
+
+.pr{padding:8px 10px;background:#f7faf9;border:1px solid var(--line);min-width:120px}
+.pr small,.pr strong,.pr span{display:block}
+.pr small{color:var(--muted);font-size:9px}
+.pr strong{margin:3px 0 1px;font-size:13px}
+.pr span{color:var(--muted);font-size:9px}
+.pr.main{border-top:3px solid var(--teal)}
+.pr.warn{border-top:3px solid var(--red)}
+.pr.warn strong{color:var(--red)}
+
+/* เลือก Job */
+.pw-job-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.pw-job-card{display:flex;flex-direction:column;gap:3px;align-items:flex-start;padding:10px 11px;border:1px solid var(--line);background:#fff;cursor:pointer;text-align:left}
+.pw-job-card strong{font-size:11px;color:var(--ink)}
+.pw-job-card span{font-size:10px;color:var(--ink)}
+.pw-job-card small{color:var(--muted);font-size:9px}
+.pw-job-card.active{border-color:var(--teal);box-shadow:inset 0 0 0 1px var(--teal)}
+.pw-job-card .status-tag{margin-top:2px}
+
+/* ตารางโซนสี */
+.pw-zone-scroll,.pw-pot-scroll,.pw-sched-scroll{overflow:auto;margin-bottom:8px}
+.pw-zone-table{min-width:1180px}
+.pw-zone-table th,.pw-zone-table td{padding:5px 6px;font-size:10px;vertical-align:middle}
+.pw-zone-table input,.pw-zone-table select{padding:5px 6px;border:1px solid var(--line);font:inherit;font-size:10px;background:#fff;color:var(--ink)}
+.pw-name{width:110px}
+.pw-colorcode{width:60px}
+.pw-pctarea{white-space:nowrap}
+.pw-toggle{display:inline-flex;align-items:center;gap:3px;font-size:9px;color:var(--muted);margin-right:4px}
+.pw-num{width:64px}
+.pw-num.tiny{width:40px}
+.pw-params{display:flex;gap:3px;flex-wrap:wrap}
+.pw-params input{width:38px}
+.pw-zone-table td.num{white-space:nowrap;text-align:right}
+
+.tag-total{display:inline-block;padding:6px 10px;background:#e6f3f0;color:var(--teal);font-weight:900;font-size:10px}
+
+.pw-workers{margin-top:8px;font-size:10px;color:var(--muted)}
+.pw-workers summary{cursor:pointer;font-weight:900;color:var(--ink)}
+.pw-worker-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.pw-worker-tags span{display:flex;align-items:center;gap:5px;padding:4px 7px;background:#f1f5f4;font-size:9px}
+.pw-worker-x{border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:12px;font-weight:900;line-height:1;padding:0}
+.pw-worker-x:hover{color:var(--red)}
+.pw-worker-check-grid{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.pw-worker-check{display:flex;align-items:center;gap:5px;padding:5px 9px;border:1px solid var(--line);background:#fff;font-size:10px;cursor:pointer}
+.pw-worker-check input{accent-color:var(--teal);cursor:pointer}
+
+.pw-save-bar{display:flex;align-items:center;gap:12px;padding:12px 2px 4px}
+.pw-save-bar small{color:var(--muted);font-size:9px}
+
+/* ใบสั่งย้อม (Dye Order) */
+.pw-dye-grid-outer{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-bottom:8px}
+.pw-dye-card{border:1px solid var(--line);background:#fbfdfc;padding:10px 11px;display:flex;flex-direction:column;gap:7px}
+.pw-dye-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.pw-dye-head strong{font-size:11px}
+.pw-dye-head span{color:var(--muted);font-size:9px}
+.pw-dye-grid{display:flex;flex-wrap:wrap;gap:7px 8px;align-items:flex-end}
+.pw-dye-grid .pf{min-width:0;flex:1 1 110px}
+.pw-dye-grid .pf.tiny{flex:1 1 90px}
+.pw-dye-grid input,.pw-dye-grid select{width:100%;min-width:0}
+.pw-dye-flags{display:flex;flex-wrap:wrap;gap:10px;font-size:9px;color:var(--muted)}
+.pw-dye-flags label{display:flex;align-items:center;gap:4px}
+.pf.warn-label{color:var(--red)}
+.pw-dye-warn{color:var(--red);font-size:9px;font-weight:900;flex-basis:100%}
+.pw-dye-cost{font-size:10px;border-top:1px dashed var(--line);padding-top:7px}
+.pw-dye-cost small{display:block;color:var(--muted);font-size:9px;margin-top:2px}
+.pw-dye-cost.muted{color:var(--muted)}
+
+/* ส่งแผนกทอ / Surplus / KPI */
+.pw-toggle-lg{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:900;color:var(--ink)}
+.tag-total.muted{background:#eef2f1;color:var(--muted)}
+#weaveIssueView .col-empty{padding:16px;text-align:center;color:var(--muted);font-size:11px}
+#weaveIssueView table.calc-table{min-width:0}
+
+@media(max-width:900px){
+  .pw-row{flex-direction:column;align-items:stretch}
+  .pf,.pr{width:100%}
+}

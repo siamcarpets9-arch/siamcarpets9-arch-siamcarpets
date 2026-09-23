@@ -1,0 +1,50 @@
+/* โค้ดสี — ใช้ตัวแปรสีร่วมกับ styles.css */
+#colorsView [hidden],.col-lb[hidden]{display:none!important}
+#colorsView .col-panel{margin-bottom:9px}
+#colorsView .muted{color:var(--muted)}
+.col-check{padding:12px 14px 14px}
+.col-check textarea{width:100%;padding:8px 9px;border:1px solid var(--line);font:inherit;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;background:#fff;color:var(--ink);margin-bottom:10px}
+.col-check textarea:focus,.col-add input:focus{outline:2px solid #13848a55;border-color:var(--teal)}
+.col-table{min-width:0;width:100%;border-collapse:collapse}
+.col-table th{background:#f1f5f4;padding:7px 10px;font-size:10px;text-align:left;white-space:nowrap}
+.col-table td{padding:7px 10px;border-bottom:1px solid #edf1f0;font-size:11px;vertical-align:top}
+.col-table td small{display:block;color:var(--muted);font-size:9px;margin-top:2px}
+.col-table .status-tag{white-space:nowrap}
+.col-empty{padding:16px;text-align:center;color:var(--muted);font-size:11px}
+.col-sw{display:inline-block;width:14px;height:14px;border:1px solid #0003;vertical-align:-3px;margin-right:5px}
+.col-hex{display:flex;gap:4px}
+.col-hex input[type=color]{width:34px;padding:1px;flex:none;height:auto}
+
+/* ชุดสี */
+.col-series{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:9px;padding:12px 14px 14px}
+.col-card{border:1px solid var(--line);background:#fff;padding:10px 11px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.col-card header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.col-card p{margin:0;font-size:10px;color:#4a5a5d;line-height:1.5}
+.col-card small{color:var(--muted);font-size:9px}
+.col-thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:4px}
+.col-thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border:1px solid var(--line);cursor:zoom-in;background:#f1f5f4}
+.col-thumbs img:hover{outline:2px solid var(--teal)}
+
+/* ฟอร์มเพิ่ม */
+.col-add{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:flex-end;padding:12px 14px;border-bottom:1px solid var(--line)}
+.col-add label{display:grid;gap:4px;color:var(--muted);font-size:9px;font-weight:900}
+.col-add input{padding:7px 8px;border:1px solid var(--line);font:inherit;font-size:11px;background:#fff;color:var(--ink);min-width:0;width:150px}
+.col-add label:nth-child(3) input,.col-add label:nth-child(5) input{width:190px}
+.col-add .col-hex input:first-child{width:100px}
+#colorsView .panel-heading label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:9px;font-weight:900}
+#colorsView .panel-heading label input{padding:7px 8px;border:1px solid var(--line);font:inherit;font-size:11px;width:220px}
+#colorsView .action-button.ghost{border-color:var(--line);color:#4a5a5d}
+
+/* ขยายรูป */
+.col-lb{position:fixed;inset:0;z-index:80;background:#0c1e20e6;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;padding:20px}
+.col-lb img{max-width:min(92vw,1100px);max-height:82vh;object-fit:contain;background:#fff;box-shadow:0 10px 40px #000a}
+#colLbCap{color:#dfe9e8;font-size:12px}
+.col-lb button{position:absolute;border:0;background:#ffffff26;color:#fff;font-size:26px;cursor:pointer;width:44px;height:44px;line-height:1}
+.col-lb button:hover{background:#ffffff4d}
+.col-lb-x{top:14px;right:14px}
+.col-lb-nav.prev{left:14px;top:50%}
+.col-lb-nav.next{right:14px;top:50%}
+
+@media(max-width:700px){.col-add input,.col-add label:nth-child(3) input,.col-add label:nth-child(5) input{width:100%}.col-add label{flex:1 1 140px}#colorsView .panel-heading label input{width:150px}.col-series{grid-template-columns:1fr}}
+.col-add label:has(input[name=year]) input{width:80px}
+.col-add label:has(input[name=tone]) input{width:130px}

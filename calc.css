@@ -1,0 +1,28 @@
+/* เครื่องคำนวณ — ใช้ตัวแปรสีร่วมกับ styles.css */
+#calcView [hidden]{display:none!important}
+#calcView .num{text-align:right;white-space:nowrap}
+.calc-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;align-items:start}
+.calc-card.wide{grid-column:1/-1}
+.calc-body{padding:12px 14px 14px}
+.calc-row{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end;margin-bottom:12px}
+.calc-row.quick{margin:12px 0 0;padding-top:12px;border-top:1px dashed var(--line)}
+.calc-row .cl{align-self:center;font-weight:900;font-size:11px;color:var(--teal);min-width:34px}
+.calc-row .cx{align-self:flex-end;padding-bottom:8px;font-weight:900;color:var(--muted)}
+.cf{display:grid;gap:4px;color:var(--muted);font-size:9px;font-weight:900;align-content:start}
+.cf input,.cf select{padding:7px 8px;border:1px solid var(--line);background:#fff;font:inherit;font-size:12px;color:var(--ink);min-width:0;width:104px}
+.cf select{width:auto;min-width:104px}
+.cf input:focus,.cf select:focus{outline:2px solid #13848a55;border-color:var(--teal)}
+.calc-res{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.cr{padding:8px 10px;background:#f7f9f8;border:1px solid var(--line);border-top:3px solid #cdd8d7;min-width:0}
+.cr.main{background:#f1f8f7;border-top-color:var(--teal)}
+.cr small,.cr strong{display:block}
+.cr small{color:var(--muted);font-size:9px}
+.cr strong{margin-top:3px;font-size:17px;white-space:nowrap}
+.calc-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.roll-scroll{margin-top:12px;max-height:320px;overflow:auto;border:1px solid var(--line)}
+.calc-table{min-width:0;width:100%;border-collapse:collapse}
+.calc-table th{position:sticky;top:0;background:#f1f5f4;padding:7px 12px;font-size:10px;text-align:left}
+.calc-table td{padding:6px 12px;border-bottom:1px solid #edf1f0;font-size:11px}
+.calc-table tr.hit td{background:#fff3d6;font-weight:900}
+@media(max-width:1000px){.calc-grid{grid-template-columns:1fr}}
+@media(max-width:520px){.cf input,.cf select{width:88px}.cr strong{font-size:15px}}

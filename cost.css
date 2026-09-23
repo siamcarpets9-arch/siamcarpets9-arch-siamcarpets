@@ -1,0 +1,116 @@
+/* ต้นทุน Design — ใช้ตัวแปรสีและองค์ประกอบร่วมกับ styles.css */
+#costView [hidden]{display:none!important}
+#costView .num{text-align:right;white-space:nowrap}
+#costView td.num small{text-align:right}
+#costView .muted{color:var(--muted)}
+#costView .ot{color:#a86b12;font-weight:900}
+#costView .text-button{border:0;background:none;color:var(--teal);font-weight:900;cursor:pointer;font-size:10px}
+#costView .action-button.danger{border-color:var(--red);background:var(--red);color:#fff}
+
+/* heading */
+.cost-actions{flex-wrap:wrap;justify-content:flex-end}
+.cost-actions label{display:flex;align-items:center;gap:6px;font-weight:900}
+.cost-actions select,.cost-filters select{padding:7px 8px;border:1px solid var(--line);background:#fff;font:inherit;min-width:140px}
+.heading-actions button.primary-action{background:var(--teal);border-color:var(--teal);color:#fff}
+
+/* notices */
+.cost-notice{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:7px;padding:10px 13px;border:1px solid var(--line);border-left:4px solid var(--teal);background:#fff;font-size:11px}
+.cost-notice.warn{border-left-color:var(--gold);background:#fffaf0}
+.cost-notice.info{color:#4a5a5d}
+
+/* KPI */
+.cost-kpi-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:9px}
+.cost-kpi{padding:10px 11px;background:#fff;border:1px solid var(--line);border-top:3px solid var(--teal);min-width:0}
+.cost-kpi:nth-child(2){border-top-color:var(--orange)}
+.cost-kpi:nth-child(3){border-top-color:var(--blue)}
+.cost-kpi:nth-child(4){border-top-color:var(--purple)}
+.cost-kpi:nth-child(5){border-top-color:var(--gold)}
+.cost-kpi:nth-child(6){border-top-color:var(--green)}
+.cost-kpi.primary{background:#f1f8f7}
+.cost-kpi small,.cost-kpi strong,.cost-kpi span{display:block}
+.cost-kpi small{color:var(--muted);font-size:9px}
+.cost-kpi strong{margin:4px 0 1px;font-size:19px;white-space:nowrap}
+.cost-kpi span{color:var(--muted);font-size:9px}
+
+/* insights */
+.cost-insight{margin-bottom:9px}
+.cost-insight ul{margin:0;padding:10px 14px 12px 30px;color:#3d4d50;line-height:1.75}
+.cost-insight li::marker{color:var(--teal)}
+
+/* settings */
+.cost-settings,.manual-form-panel#tripFormPanel{margin-bottom:9px}
+.settings-block{padding:12px 14px;border-bottom:1px solid var(--line)}
+.settings-block h3{margin:0 0 9px;font-size:12px}
+.settings-block h3 small{margin-left:6px;color:var(--muted);font-weight:400;font-size:9px}
+.settings-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:9px;margin-top:8px}
+.settings-grid label,.settings-wide{display:grid;gap:4px;color:var(--muted);font-size:9px;font-weight:900;align-content:start}
+.settings-grid em{color:#9aa6a8;font-weight:400;font-style:normal}
+.settings-block input,.settings-block textarea,.trip-form input{padding:7px;border:1px solid var(--line);font:inherit;font-size:11px;width:100%;background:#fff;color:var(--ink)}
+.settings-wide{margin-top:10px}
+.settings-table{min-width:0;width:auto;margin-bottom:4px}
+.settings-table th,.settings-table td{padding:6px 12px 6px 0;border-bottom:1px solid #edf1f0}
+.settings-table input{width:150px}
+.weekday-row{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:11px;color:var(--muted);font-size:10px;font-weight:900}
+.weekday-row .check-control input{width:auto}
+.customer-sale-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:8px 14px;max-height:340px;overflow:auto;padding:2px}
+.customer-sale-grid label{display:grid;gap:3px;font-size:10px;color:#4a5a5d}
+.customer-sale-grid em{color:var(--muted);font-size:9px;font-style:normal}
+.settings-actions{display:flex;align-items:center;gap:12px;padding:11px 14px}
+.settings-actions small{color:var(--muted);font-size:9px}
+
+/* trip form */
+.trip-form{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;align-items:end;margin-top:2px}
+.trip-form label,.trip-form legend{display:grid;gap:4px;color:var(--muted);font-size:9px;font-weight:900}
+.trip-people{grid-column:span 3;margin:0;padding:6px 8px;border:1px solid var(--line);min-height:52px}
+.trip-people legend{padding:0 4px}
+.trip-people>div{display:flex;flex-wrap:wrap;gap:6px 14px}
+.trip-people .check-control input{width:auto}
+.trip-note{grid-column:span 3}
+.trip-preview{grid-column:1/-1;margin:0;padding:9px 11px;background:#f1f8f7;border-left:4px solid var(--teal);color:#37494c;font-size:10px;line-height:1.6}
+.trip-form button{width:max-content}
+
+/* project table */
+.cost-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.cost-filters>span,.cost-count{color:var(--teal);font-size:10px;font-weight:900}
+.cost-filters label{display:flex;align-items:center;gap:6px}
+.cost-filters input{width:200px}
+.cost-table{min-width:1180px}
+.cost-table.compact,.cost-table.detail{min-width:0}
+.cost-table.detail{min-width:1040px}
+.cost-table.compact th,.cost-table.compact td{padding:8px 8px}
+.cost-table tfoot td{background:#f7f9f8;border-top:2px solid var(--line);border-bottom:0}
+.cost-table tr.selected td{background:#f1f8f7}
+.cost-table tr.muted-row td{color:var(--muted)}
+.cost-table td.total{min-width:120px}
+.cost-table td.total strong{display:block}
+.sale-input{width:150px;padding:5px 6px;border:1px solid var(--line);font:inherit;font-size:11px;background:#fff}
+.sale-input:placeholder-shown{border-style:dashed;color:var(--muted)}
+.hour-input{width:66px;padding:4px 5px;border:1px solid var(--line);font:inherit;text-align:right;background:#fff}
+.cost-bar{display:flex;height:6px;margin-top:4px;background:#e8eeee;overflow:hidden}
+.cost-bar i{display:block;height:100%}
+.cost-bar .n,.cost-dot.n{background:var(--teal)}
+.cost-bar .o,.cost-dot.o{background:var(--orange)}
+.cost-bar .s,.cost-dot.s{background:var(--blue)}
+.cost-dot{display:inline-block;width:8px;height:8px;margin:0 3px 0 6px;border-radius:2px;vertical-align:baseline}
+
+/* detail */
+.cost-detail-head{align-items:flex-start}
+.cost-detail-head>div:first-child{min-width:200px}
+.cost-mini-kpis{display:flex;gap:16px;flex-wrap:wrap;margin-left:auto}
+.cost-mini-kpis span small,.cost-mini-kpis span strong{display:block}
+.cost-mini-kpis span small{margin:0;color:var(--muted);font-size:9px}
+.cost-mini-kpis span strong{font-size:14px}
+.cost-detail-tools{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 14px;background:#f7f9f8;border-bottom:1px solid var(--line)}
+.cost-detail-tools small{color:var(--muted);font-size:10px}
+.cost-detail-scroll{max-height:460px;overflow:auto}
+.cost-detail-scroll thead th{position:sticky;top:0;z-index:1}
+.panel-heading.sub{border-top:1px solid var(--line)}
+
+.cost-two-col{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:9px 0}
+.cost-two-col .department-panel{min-width:0}
+#costView .department-panel{margin-bottom:9px}
+.cost-two-col .department-panel{margin-bottom:0}
+
+@media(max-width:1100px){.cost-kpi-grid{grid-template-columns:repeat(3,1fr)}.cost-two-col{grid-template-columns:1fr}.trip-form{grid-template-columns:repeat(3,1fr)}.trip-people,.trip-note{grid-column:1/-1}}
+@media(max-width:900px){.cost-filters{justify-content:flex-start;margin-top:10px}.cost-filters input{width:100%}.cost-actions{justify-content:flex-start}.cost-mini-kpis{margin:10px 0}}
+@media(max-width:520px){.cost-kpi-grid{grid-template-columns:repeat(2,1fr)}.trip-form{grid-template-columns:1fr}}

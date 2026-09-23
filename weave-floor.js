@@ -1,0 +1,836 @@
+/* ============================================================
+   แผนกทอ — หน้าจอทอรายวัน (Weaving Floor Daily Production) + QC Dashboard
+   - ขึ้นทอ: กำหนดจอทอ/เกรด/แบบอ้างอิงต่อ M/O แต่ละชิ้น (ผ้าใบต้องพร้อมจากขั้น "ส่งแผนกทอ" — ไหมพร้อมได้ทีละสี ไม่ต้องรอครบทุกสี)
+   - บันทึกประจำวันต่อจอ: ช่วงปกติ 08.00-16.30 (พัก 30 นาที) + โอที 17.00-20.00 แยกกัน คำนวณ ตร.ม./คน/ชม. อัตโนมัติ คงเหลือยกไปวันถัดไปอัตโนมัติ
+   - ไหมเข้าจอต่อวันต่อสี (จากหม้อย้อมของใบวางแผนงาน) + คำขอไหมเพิ่มถ้าไม่พอ (ส่งให้แผนกวางแผนออกใบสั่งย้อม)
+   - ช่างปรับปืน (ระยะเวลา/เหตุผล/ผู้รับผิดชอบ) ทั้งกะปกติและโอที
+   - QC ต่อจอ (วันที่ตรวจ/ผู้ตรวจ/ผล/รายละเอียด) → แสดงในหน้า QC Dashboard
+   - สรุปประจำวัน + แยกตามเกรด (ตรงตามฟอร์แมต Excel รายงานการผลิตพรมทอมือ) + ส่งออก/นำเข้า Excel + แจ้งเตือน (จำลอง — ยังไม่ได้ต่อ LINE จริง)
+   ต้องโหลดหลัง app.js, sales.js, planning.js, weaving.js (ใช้ PlanningEngine, WeavingEngine, SalesEngine, designs, $, $$, toast, XLSX)
+   ============================================================ */
+(function () {
+  "use strict";
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const num = (v) => { const n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return Number.isFinite(n) ? n : 0; };
+  const has = (v) => String(v == null ? "" : v).trim() !== "";
+  const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fmt = (n, d = 2) => { const x = typeof n === "number" ? n : parseFloat(String(n == null ? "" : n).replace(/,/g, "")); return (Number.isFinite(x) ? x : 0).toLocaleString("th-TH", { minimumFractionDigits: d, maximumFractionDigits: d }); };
+  const uid = (p) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const readJson = (k, fb) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch (e) { return fb; } };
+  const writeJson = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ยังใช้ต่อได้ */ } };
+  const todayIso = () => new Date().toISOString().slice(0, 10);
+  const thaiDate = (iso) => { try { return new Date(iso + "T00:00:00").toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }); } catch (e) { return iso; } };
+
+  const PE = () => window.PlanningEngine;
+  const WE = () => window.WeavingEngine;
+  const KEY_WORKERS_SHARED = "siam-workforce"; // ทะเบียนพนักงานทอ/ตกแต่ง (ตั้งต้นจากหน้าใบวางแผนงาน)
+
+  const KEY_FLOOR = "siam-weave-floor";              // { [designId]: { pieces:{[lineIdx]:PieceRec}, yarnDraw:{[potKey]:{[iso]:kg}} } }
+  const KEY_YARN_REQ = "siam-yarn-topup-requests";   // [ {id,designId,potKey,label,colorCode,requestedKg,reason,neededDate,requestedAt,approver,resolved,resolvedAt} ]
+  const KEY_QC = "siam-loom-qc";                     // [ {id,designId,lineIdx,loomNo,date,inspector,result,detail,createdAt} ]
+  const KEY_NOTIFY = "siam-line-notify-log";         // [ {id,date,message,sentAt} ]
+
+  const QC_RESULTS = ["ผ่าน", "ไม่ผ่าน", "มีข้อสังเกต"];
+
+  /* ============================================================
+     Engine — โครงสร้างข้อมูล
+     ============================================================ */
+  function loadFloorAll() { return readJson(KEY_FLOOR, {}); }
+  function saveFloorAll(all) { writeJson(KEY_FLOOR, all); }
+  function ensureDesignFloor(designId) {
+    const all = loadFloorAll();
+    if (!all[designId]) all[designId] = { pieces: {}, yarnDraw: {} };
+    if (!all[designId].pieces) all[designId].pieces = {};
+    if (!all[designId].yarnDraw) all[designId].yarnDraw = {};
+    return all[designId];
+  }
+  function saveDesignFloor(designId, rec) { const all = loadFloorAll(); all[designId] = rec; saveFloorAll(all); }
+
+  function ensurePieceRec(dfloor, lineIdx) {
+    if (!dfloor.pieces[lineIdx]) dfloor.pieces[lineIdx] = { loomNo: "", gradeOverride: "", patternImage: "", days: {} };
+    return dfloor.pieces[lineIdx];
+  }
+  function ensureDayRec(piece, iso) {
+    if (!piece.days[iso]) piece.days[iso] = {
+      normal: { doneSqm: "", workers: [], start: "08:00", end: "16:30", breakMin: 30 },
+      ot: { doneSqm: "", workers: [], start: "17:00", end: "20:00", breakMin: 0 },
+      gunAdjust: []
+    };
+    return piece.days[iso];
+  }
+
+  function timeToDec(t) { const parts = String(t || "0:0").split(":"); const h = num(parts[0]), m = num(parts[1]); return h + m / 60; }
+  function shiftHours(shift) { const h = timeToDec(shift.end) - timeToDec(shift.start) - num(shift.breakMin) / 60; return Math.max(0, h); }
+  function shiftManHours(shift) { return shiftHours(shift) * ((shift.workers || []).length); }
+  function shiftEff(shift) { const mh = shiftManHours(shift); return mh > 0 ? num(shift.doneSqm) / mh : 0; }
+
+  function sortedDates(piece) { return Object.keys(piece.days).sort(); }
+  function cumulativeDoneBefore(piece, iso) {
+    let sum = 0;
+    sortedDates(piece).forEach((d) => { if (d < iso) { const day = piece.days[d]; sum += num(day.normal.doneSqm) + num(day.ot.doneSqm); } });
+    return sum;
+  }
+  function dayCarryNormal(piece, iso, totalArea) { return Math.max(0, totalArea - cumulativeDoneBefore(piece, iso)); }
+  function dayCarryOt(piece, iso, totalArea) { const day = piece.days[iso]; return Math.max(0, dayCarryNormal(piece, iso, totalArea) - num(day.normal.doneSqm)); }
+  function dayRemaining(piece, iso, totalArea) { const day = piece.days[iso]; return Math.max(0, dayCarryOt(piece, iso, totalArea) - num(day.ot.doneSqm)); }
+  function pieceDoneTotal(piece) { return sortedDates(piece).reduce((s, d) => { const day = piece.days[d]; return s + num(day.normal.doneSqm) + num(day.ot.doneSqm); }, 0); }
+
+  /* ---------- Yarn top-up requests (ใบขอไหมเพิ่ม → แผนกวางแผนออกใบสั่งย้อม) ---------- */
+  function loadYarnRequests() { return readJson(KEY_YARN_REQ, []); }
+  function saveYarnRequests(list) { writeJson(KEY_YARN_REQ, list); }
+  function addYarnRequest(req) { const all = loadYarnRequests(); all.push({ id: uid("yr"), requestedAt: new Date().toISOString(), approver: "", resolved: false, resolvedAt: null, ...req }); saveYarnRequests(all); return all; }
+  function updateYarnRequest(id, patch) { const all = loadYarnRequests(); const i = all.findIndex((r) => r.id === id); if (i >= 0) { all[i] = { ...all[i], ...patch }; saveYarnRequests(all); } return all; }
+  function pendingYarnRequests() { return loadYarnRequests().filter((r) => !r.resolved); }
+
+  /* ---------- QC log ---------- */
+  function loadQc() { return readJson(KEY_QC, []); }
+  function saveQc(list) { writeJson(KEY_QC, list); }
+  function addQc(entry) { const all = loadQc(); all.push({ id: uid("qc"), createdAt: new Date().toISOString(), ...entry }); saveQc(all); return all; }
+
+  /* ---------- LINE notify log (จำลอง — ยังไม่เชื่อมต่อ LINE จริง) ---------- */
+  function loadNotify() { return readJson(KEY_NOTIFY, []); }
+  function saveNotify(list) { writeJson(KEY_NOTIFY, list); }
+  function logNotify(date, message) { const all = loadNotify(); all.push({ id: uid("ln"), date, message, sentAt: new Date().toISOString() }); saveNotify(all); return all; }
+
+  /* ---------- ข้อมูลอ้างอิงจาก Planning / Sales / WeavingEngine ---------- */
+  function planFor(designId) { const plans = PE().readJson(PE().KEY_PLANS, {}); return plans[designId] || null; }
+  function dyePlanOf(plan) { return PE().computeDyePlan(plan.zones, num(plan.totalAreaSqm), plan.bufferPct); }
+  function moDocOf(designId) {
+    try { if (typeof SalesEngine !== "undefined" && SalesEngine.getDocs) return SalesEngine.getDocs().find((d) => d.designId === designId && d.type === "MO"); } catch (e) { /* ไม่มี SalesEngine */ }
+    return null;
+  }
+  function issueRecOf(designId) { return readJson(WE().KEY_ISSUES, {})[designId] || null; }
+  function loadWeaveWorkers() { const w = readJson(KEY_WORKERS_SHARED, null); return Array.isArray(w) ? w : []; }
+  function linesOf(designId, plan) {
+    const doc = moDocOf(designId);
+    return (doc && doc.lines && doc.lines.length) ? doc.lines : [{ location: (designs.find((d) => d.id === designId) || {}).project || designId, sqm: plan ? plan.totalAreaSqm : 0 }];
+  }
+  function suggestedGradeFor(plan) { return plan.weaveGradeOverride ? plan.weaveGradeOverride : ((PE().suggestGrade(PE().WEAVE_GRADES, plan.patternPct) || {}).grade || ""); }
+
+  /* ============================================================
+     M/O ที่พร้อมขึ้นทอ — เกต: มีแผนบันทึกแล้ว + ผ้าใบพร้อม (canvasReady จากขั้น "ส่งแผนกทอ")
+     ไม่บังคับรอไหมครบทุกสี — สีไหนพร้อมก่อนก็เริ่มบันทึกจอนั้นได้ก่อน
+     ============================================================ */
+  function readyDesigns() {
+    const plans = PE().readJson(PE().KEY_PLANS, {});
+    return designs.filter((d) => {
+      const plan = plans[d.id];
+      if (!plan || !plan.savedAt) return false;
+      const issue = issueRecOf(d.id);
+      return issue && issue.canvasReady;
+    });
+  }
+
+  /* ============================================================
+     สรุปประจำวัน / แยกตามเกรด (ข้ามทุก M/O ที่มีการบันทึกจอ)
+     ============================================================ */
+  function allPieceRefs() {
+    const all = loadFloorAll();
+    const refs = [];
+    Object.keys(all).forEach((designId) => {
+      const plan = planFor(designId);
+      if (!plan) return;
+      const lines = linesOf(designId, plan);
+      const pieces = all[designId].pieces || {};
+      Object.keys(pieces).forEach((lineIdx) => {
+        const line = lines[lineIdx] || { location: `ชิ้นที่ ${Number(lineIdx) + 1}`, sqm: 0 };
+        const grade = pieces[lineIdx].gradeOverride || suggestedGradeFor(plan);
+        refs.push({ designId, lineIdx, plan, line, piece: pieces[lineIdx], grade, totalArea: num(line.sqm) || num(plan.totalAreaSqm) });
+      });
+    });
+    return refs;
+  }
+
+  function daySummary(iso) {
+    const refs = allPieceRefs();
+    const gradeTotals = {}; // grade -> {sqm, hours}
+    let normalSqm = 0, otSqm = 0, normalHours = 0, otHours = 0;
+    const normalWorkers = new Set(), otWorkers = new Set();
+    const rows = [];
+    refs.forEach((r) => {
+      const day = r.piece.days[iso];
+      if (!day) return;
+      const nMh = shiftManHours(day.normal), oMh = shiftManHours(day.ot);
+      const nSqm = num(day.normal.doneSqm), oSqm = num(day.ot.doneSqm);
+      normalSqm += nSqm; otSqm += oSqm; normalHours += nMh; otHours += oMh;
+      (day.normal.workers || []).forEach((w) => normalWorkers.add(w));
+      (day.ot.workers || []).forEach((w) => otWorkers.add(w));
+      if (!gradeTotals[r.grade]) gradeTotals[r.grade] = { sqm: 0, hours: 0 };
+      gradeTotals[r.grade].sqm += nSqm + oSqm;
+      gradeTotals[r.grade].hours += nMh + oMh;
+      rows.push({ ...r, day, nSqm, oSqm, nMh, oMh });
+    });
+    const totalSqm = normalSqm + otSqm, totalHours = normalHours + otHours;
+    return { iso, rows, gradeTotals, normalSqm, otSqm, normalHours, otHours, totalSqm, totalHours, eff: totalHours > 0 ? totalSqm / totalHours : 0, headcount: new Set([...normalWorkers, ...otWorkers]).size, normalHeadcount: normalWorkers.size, otHeadcount: otWorkers.size };
+  }
+
+  function allLoggedDates() {
+    const set = new Set();
+    allPieceRefs().forEach((r) => sortedDates(r.piece).forEach((d) => set.add(d)));
+    return [...set].sort();
+  }
+
+  window.WeaveFloorEngine = {
+    KEY_FLOOR, KEY_YARN_REQ, KEY_QC, KEY_NOTIFY, QC_RESULTS,
+    loadFloorAll, ensureDesignFloor, saveDesignFloor, ensurePieceRec, ensureDayRec,
+    timeToDec, shiftHours, shiftManHours, shiftEff, sortedDates, cumulativeDoneBefore,
+    dayCarryNormal, dayCarryOt, dayRemaining, pieceDoneTotal,
+    loadYarnRequests, saveYarnRequests, addYarnRequest, updateYarnRequest, pendingYarnRequests,
+    loadQc, saveQc, addQc, loadNotify, saveNotify, logNotify,
+    planFor, dyePlanOf, moDocOf, issueRecOf, loadWeaveWorkers, linesOf, suggestedGradeFor,
+    readyDesigns, allPieceRefs, daySummary, allLoggedDates, readJson, writeJson
+  };
+
+  /* ============================================================
+     UI — แผนกทอ (จอทอรายวัน)
+     ============================================================ */
+  const state = { tab: "setup", designId: null, lineIdx: null, day: todayIso() };
+
+  function field(label, inner) { return `<label class="pf">${label}${inner}</label>`; }
+  function res(label, value, cls = "") { return `<div class="pr ${cls}"><small>${label}</small><strong>${value}</strong></div>`; }
+  function checkGrid(name, options, selected) {
+    return `<div class="pw-worker-check-grid">${options.map((w, i) => `<label class="pw-worker-check"><input type="checkbox" data-check="${esc(name)}" value="${esc(w)}" ${(selected || []).includes(w) ? "checked" : ""}> ${esc(w)}</label>`).join("")}</div>`;
+  }
+
+  function tabBar() {
+    const tabs = [["setup", "ตั้งค่าขึ้นทอ"], ["daily", "บันทึกประจำวัน"], ["board", "หน้าจอทอ (ภาพรวม)"], ["report", "สรุป/ส่งออก/แจ้งเตือน"]];
+    return `<div class="control-strip"><div class="segmented">${tabs.map(([k, l]) => `<button type="button" class="view-btn ${state.tab === k ? "active" : ""}" data-wftab="${k}">${l}</button>`).join("")}</div></div>`;
+  }
+
+  function jobPickerHtml(pickAttr) {
+    const ready = readyDesigns();
+    if (!ready.length) return `<p class="col-empty">ยังไม่มี M/O ที่ผ้าใบพร้อม (ต้องติ๊ก “ผ้าใบสำหรับทอพร้อมแล้ว” ในหน้า “ส่งแผนกทอ” ก่อน — ไม่ต้องรอไหมครบทุกสี)</p>`;
+    const plans = PE().readJson(PE().KEY_PLANS, {});
+    return `<div class="pw-job-grid">${ready.map((d) => `<button type="button" class="pw-job-card ${state.designId === d.id ? "active" : ""}" data-${pickAttr}="${esc(d.id)}">
+      <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
+    </button>`).join("")}</div>`;
+  }
+
+  /* ---------------- Tab 1: ตั้งค่าขึ้นทอ ---------------- */
+  function pieceCardHtml(designId, plan, lines, dfloor, idx) {
+    const line = lines[idx];
+    const piece = ensurePieceRec(dfloor, idx);
+    const grade = piece.gradeOverride || suggestedGradeFor(plan);
+    const totalArea = num(line.sqm) || num(plan.totalAreaSqm);
+    const done = pieceDoneTotal(piece);
+    const remain = Math.max(0, totalArea - done);
+    return `<div class="department-panel pw-card" data-piece="${idx}">
+      <div class="pw-body">
+        <div class="pw-row">
+          ${res("ชิ้น/Location", esc(line.location || line.design || `ชิ้นที่ ${idx + 1}`))}
+          ${res("พื้นที่รวม", `${fmt(totalArea, 2)} ตร.ม.`)}
+          ${res("ทอไปแล้ว", `${fmt(done, 2)} ตร.ม.`)}
+          ${res("คงเหลือ", `${fmt(remain, 2)} ตร.ม.`, remain <= 0.0005 ? "main" : "")}
+        </div>
+        <div class="pw-row">
+          ${field("จอทอเบอร์", `<input data-pf="loomNo" value="${esc(piece.loomNo)}" placeholder="เช่น 3" class="pw-num tiny">`)}
+          ${field("เกรดทอ (ว่าง = อัตโนมัติจากใบวางแผนงาน)", `<select data-pf="gradeOverride"><option value="">อัตโนมัติ (${esc(grade)})</option>${(PE().WEAVE_GRADES || []).map((g) => `<option value="${esc(g.grade)}" ${piece.gradeOverride === g.grade ? "selected" : ""}>${esc(g.grade)}</option>`).join("")}</select>`)}
+          ${field("แนบรูปแบบพรม (เก็บในเบราว์เซอร์นี้เท่านั้น)", `<input type="file" accept="image/*" data-pf="patternImageFile">`)}
+        </div>
+        ${piece.patternImage ? `<div class="pw-row"><img src="${piece.patternImage}" alt="แบบพรม" style="max-width:140px;border:1px solid var(--line)"><button type="button" class="action-button" data-pf-clear-image>ลบรูป</button></div>` : ""}
+      </div>
+    </div>`;
+  }
+
+  function yarnPotsHtml(designId, plan) {
+    const dye = dyePlanOf(plan);
+    const issue = issueRecOf(designId);
+    const dfloor = ensureDesignFloor(designId);
+    return `<section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>ไหมเข้าจอต่อวันต่อสี</strong><small>M/O ผ้าใบครบ แต่ไหมอาจครบบางสี — สีไหนพร้อมก็บันทึก กก. ที่เข้าจอวันนี้ได้เลย (ไม่ต้องรอครบทุกสี)</small></div></div>
+      <div class="pw-body">
+        <table class="calc-table">
+          <thead><tr><th>หม้อย้อม/สี</th><th>สถานะไหมย้อม</th><th class="num">รวมส่งมอบ (กก.)</th><th class="num">เข้าจอสะสม (กก.)</th><th>กก. เข้าจอวันที่ ${thaiDate(state.day)}</th><th></th></tr></thead>
+          <tbody>${dye.pots.map((pot) => {
+      const ps = issue && issue.pots && issue.pots[pot.key];
+      const ready = ps ? ps.yarnReady : false;
+      const delivered = pot.netKg + num(ps ? ps.surplusDrawn : 0);
+      const drawMap = dfloor.yarnDraw[pot.key] || {};
+      const cumDrawn = Object.values(drawMap).reduce((s, v) => s + num(v), 0);
+      const todayVal = drawMap[state.day] || "";
+      return `<tr data-potdraw="${esc(pot.key)}">
+              <td>${esc(pot.label)}</td>
+              <td>${ready ? `<span class="status-tag">พร้อม</span>` : `<span class="status-tag blocked">ยังไม่พร้อม</span>`}</td>
+              <td class="num">${fmt(delivered, 3)}</td>
+              <td class="num">${fmt(cumDrawn, 3)} ${cumDrawn > delivered + 0.0005 ? `<br><small class="pw-dye-warn">เกินยอดส่งมอบ</small>` : ""}</td>
+              <td><input name="drawKg" value="${esc(todayVal)}" inputmode="decimal" class="pw-num tiny"> กก.</td>
+              <td><button type="button" class="action-button" data-request-yarn="${esc(pot.key)}" data-request-label="${esc(pot.label)}">ขอไหมเพิ่ม</button></td>
+            </tr>`;
+    }).join("")}</tbody>
+        </table>
+      </div>
+    </section>`;
+  }
+
+  function setupTabHtml() {
+    if (!state.designId) return `<p class="col-empty">เลือก M/O ด้านบนก่อน</p>`;
+    const plan = planFor(state.designId);
+    if (!plan) return `<p class="col-empty">ไม่พบใบวางแผนงานของ Job นี้</p>`;
+    const lines = linesOf(state.designId, plan);
+    const dfloor = ensureDesignFloor(state.designId);
+    return `
+    <section class="department-panel pw-card">
+      <div class="panel-heading"><div><strong>ตั้งค่าขึ้นทอต่อชิ้น</strong><small>กำหนดจอทอ/เกรด/แบบอ้างอิงต่อชิ้น (M/O มีหลายชิ้นแยกจอกันได้)</small></div></div>
+    </section>
+    ${lines.map((l, i) => pieceCardHtml(state.designId, plan, lines, dfloor, i)).join("")}
+    ${yarnPotsHtml(state.designId, plan)}`;
+  }
+
+  /* ---------------- Tab 2: บันทึกประจำวัน ---------------- */
+  function loomChoiceHtml() {
+    const refs = allPieceRefs().filter((r) => r.designId === state.designId);
+    if (!refs.length) return `<p class="col-empty">ยังไม่ได้ตั้งค่าขึ้นทอสำหรับ M/O นี้ (ไปที่แท็บ “ตั้งค่าขึ้นทอ” ก่อน)</p>`;
+    return `<div class="pw-job-grid">${refs.map((r) => `<button type="button" class="pw-job-card ${state.lineIdx == r.lineIdx ? "active" : ""}" data-lpick="${r.lineIdx}">
+      <strong>จอ ${esc(r.piece.loomNo || "?")}</strong><span>${esc(r.line.location || `ชิ้นที่ ${Number(r.lineIdx) + 1}`)}</span><small>เกรด ${esc(r.grade)}</small>
+    </button>`).join("")}</div>`;
+  }
+
+  function gunAdjustRowHtml(idx, g) {
+    return `<tr data-gun="${idx}">
+      <td><select name="shift"><option value="normal" ${g.shift === "normal" ? "selected" : ""}>ปกติ</option><option value="ot" ${g.shift === "ot" ? "selected" : ""}>โอที</option></select></td>
+      <td><input name="start" type="time" value="${esc(g.start)}"></td>
+      <td><input name="end" type="time" value="${esc(g.end)}"></td>
+      <td class="num">${fmt(Math.max(0, timeToDec(g.end) - timeToDec(g.start)) * 60, 0)} นาที</td>
+      <td><input name="technician" value="${esc(g.technician)}" placeholder="ชื่อช่าง"></td>
+      <td><input name="reason" value="${esc(g.reason)}" placeholder="เหตุผลที่ปรับ"></td>
+      <td><button type="button" class="pw-worker-x" data-remove-gun="${idx}" title="ลบ">×</button></td>
+    </tr>`;
+  }
+
+  function qcRowsHtml(designId, lineIdx, loomNo) {
+    const list = loadQc().filter((q) => q.designId === designId && String(q.lineIdx) === String(lineIdx)).sort((a, b) => b.date.localeCompare(a.date));
+    if (!list.length) return `<p class="col-empty">ยังไม่มีประวัติ QC ของจอนี้</p>`;
+    return `<table class="calc-table"><thead><tr><th>วันที่ตรวจ</th><th>ผู้ตรวจ</th><th>ผล</th><th>รายละเอียด</th></tr></thead><tbody>${list.map((q) => `<tr><td>${thaiDate(q.date)}</td><td>${esc(q.inspector)}</td><td><span class="status-tag ${q.result === "ไม่ผ่าน" ? "blocked" : q.result === "มีข้อสังเกต" ? "review" : ""}">${esc(q.result)}</span></td><td>${esc(q.detail)}</td></tr>`).join("")}</tbody></table>`;
+  }
+
+  function dailyTabHtml() {
+    if (!state.designId) return `<p class="col-empty">เลือก M/O ด้านบนก่อน</p>`;
+    const plan = planFor(state.designId);
+    if (!plan) return `<p class="col-empty">ไม่พบใบวางแผนงานของ Job นี้</p>`;
+    const lines = linesOf(state.designId, plan);
+    const dfloor = ensureDesignFloor(state.designId);
+    const loomPicker = `<section class="department-panel pw-card"><div class="panel-heading"><div><strong>เลือกจอทอของ M/O นี้</strong></div></div><div class="pw-body">${loomChoiceHtml()}</div></section>`;
+    if (state.lineIdx == null) return loomPicker + `<p class="col-empty">เลือกจอด้านบนเพื่อบันทึกประจำวัน</p>`;
+    const piece = ensurePieceRec(dfloor, state.lineIdx);
+    const line = lines[state.lineIdx] || { location: `ชิ้นที่ ${Number(state.lineIdx) + 1}`, sqm: 0 };
+    const totalArea = num(line.sqm) || num(plan.totalAreaSqm);
+    const day = ensureDayRec(piece, state.day);
+    const workers = loadWeaveWorkers();
+    const carryN = dayCarryNormal(piece, state.day, totalArea);
+    const carryOt = dayCarryOt(piece, state.day, totalArea);
+    const remain = dayRemaining(piece, state.day, totalArea);
+    const nMh = shiftManHours(day.normal), oMh = shiftManHours(day.ot);
+    const nEff = shiftEff(day.normal), oEff = shiftEff(day.ot);
+    const totalSqm = num(day.normal.doneSqm) + num(day.ot.doneSqm), totalMh = nMh + oMh;
+
+    return loomPicker + `
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>บันทึกประจำวัน — จอ ${esc(piece.loomNo || "?")} · ${esc(line.location || "-")}</strong><small>เลือกวันที่แล้วกรอกข้อมูลกะปกติ/โอที — ระบบคำนวณคงเหลือยกไปวันถัดไปให้อัตโนมัติ</small></div></div>
+      <div class="pw-body">
+        <div class="pw-row">${field("วันที่บันทึก", `<input type="date" id="wfDayPicker" value="${esc(state.day)}">`)}${res("พื้นที่รวมชิ้นนี้", `${fmt(totalArea, 2)} ตร.ม.`)}${res("คงเหลือหลังวันนี้", `${fmt(remain, 2)} ตร.ม.`, remain <= 0.0005 ? "main" : "")}</div>
+
+        <div class="pw-job-card" style="cursor:default;align-items:stretch;width:100%">
+          <strong>ช่วงเวลาปกติ 08.00–16.30 น. (ปรับเวลาได้)</strong>
+          <div class="pw-row" style="margin-top:6px">
+            ${res("คงเหลือยกมา", `${fmt(carryN, 2)} ตร.ม.`)}
+            ${field("พ.ท. ทำได้วันนี้ (ตร.ม.)", `<input data-shift="normal" data-field="doneSqm" value="${esc(day.normal.doneSqm)}" inputmode="decimal" class="pw-num tiny">`)}
+            ${field("เริ่ม", `<input data-shift="normal" data-field="start" type="time" value="${esc(day.normal.start)}">`)}
+            ${field("เลิก", `<input data-shift="normal" data-field="end" type="time" value="${esc(day.normal.end)}">`)}
+            ${field("พักเที่ยง (นาที)", `<input data-shift="normal" data-field="breakMin" value="${esc(day.normal.breakMin)}" inputmode="numeric" class="pw-num tiny">`)}
+          </div>
+          <label class="pf" style="margin-top:6px">รายชื่อพนักงานกะปกติ</label>
+          ${workers.length ? checkGrid("normal", workers, day.normal.workers) : `<p class="col-empty">ยังไม่มีทะเบียนพนักงานทอ (เปิดหน้า “ใบวางแผนงาน” ครั้งหนึ่งเพื่อสร้างทะเบียน)</p>`}
+          <div class="pw-res-row" style="margin-top:6px">${res("จำนวนคน", `${(day.normal.workers || []).length} คน`)}${res("รวมชั่วโมง (คน×ชม.)", fmt(nMh, 1))}${res("ประสิทธิภาพ (ตรม./คน/ชม.)", fmt(nEff, 3), "main")}</div>
+        </div>
+
+        <div class="pw-job-card" style="cursor:default;align-items:stretch;width:100%;margin-top:8px">
+          <strong>ช่วงเวลาโอที 17.00–20.00 น. (ปรับเวลาได้)</strong>
+          <div class="pw-row" style="margin-top:6px">
+            ${res("คงเหลือยกมา (ต่อจากกะปกติ)", `${fmt(carryOt, 2)} ตร.ม.`)}
+            ${field("พ.ท. ทำได้โอที (ตร.ม.)", `<input data-shift="ot" data-field="doneSqm" value="${esc(day.ot.doneSqm)}" inputmode="decimal" class="pw-num tiny">`)}
+            ${field("เริ่ม", `<input data-shift="ot" data-field="start" type="time" value="${esc(day.ot.start)}">`)}
+            ${field("เลิก", `<input data-shift="ot" data-field="end" type="time" value="${esc(day.ot.end)}">`)}
+            ${field("พัก (นาที)", `<input data-shift="ot" data-field="breakMin" value="${esc(day.ot.breakMin)}" inputmode="numeric" class="pw-num tiny">`)}
+          </div>
+          <label class="pf" style="margin-top:6px">รายชื่อพนักงานโอที</label>
+          ${workers.length ? checkGrid("ot", workers, day.ot.workers) : ""}
+          <div class="pw-res-row" style="margin-top:6px">${res("จำนวนคน", `${(day.ot.workers || []).length} คน`)}${res("รวมชั่วโมง (คน×ชม.)", fmt(oMh, 1))}${res("ประสิทธิภาพ (ตรม./คน/ชม.)", fmt(oEff, 3), "main")}</div>
+        </div>
+
+        <div class="pw-res-row" style="margin-top:8px">${res("รวมพื้นที่ทั้งวัน", `${fmt(totalSqm, 2)} ตร.ม.`, "main")}${res("รวมชั่วโมงทั้งวัน", fmt(totalMh, 1))}${res("ประสิทธิภาพรวม", fmt(totalMh > 0 ? totalSqm / totalMh : 0, 3))}</div>
+      </div>
+    </section>
+
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>ช่างปรับปืน (ปรับความตึง/ปืนทอ)</strong><small>บันทึกทุกครั้งที่มีการปรับ ทั้งกะปกติและโอที — ระยะเวลาคำนวณจากเวลาเริ่ม-เลิกอัตโนมัติ</small></div></div>
+      <div class="pw-body">
+        <table class="calc-table"><thead><tr><th>กะ</th><th>เริ่ม</th><th>เลิก</th><th>ระยะเวลา</th><th>ช่างผู้รับผิดชอบ</th><th>เหตุผล</th><th></th></tr></thead>
+        <tbody>${(day.gunAdjust || []).map((g, i) => gunAdjustRowHtml(i, g)).join("") || `<tr><td colspan="7" class="col-empty">ยังไม่มีรายการปรับปืนวันนี้</td></tr>`}</tbody></table>
+        <div class="pw-save-bar"><button type="button" class="action-button" data-add-gun>+ เพิ่มรายการปรับปืน</button></div>
+      </div>
+    </section>
+
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>QC ตรวจจอทอ</strong><small>บันทึกวันที่ตรวจ/ผู้ตรวจ/ผล/รายละเอียด — แสดงผลรวมในหน้า QC Dashboard</small></div></div>
+      <div class="pw-body">
+        <div class="pw-row">
+          ${field("วันที่ตรวจ", `<input type="date" id="qcDate" value="${esc(state.day)}">`)}
+          ${field("ผู้ตรวจ", `<input id="qcInspector" placeholder="ชื่อผู้ตรวจ QC">`)}
+          ${field("ผล", `<select id="qcResult">${QC_RESULTS.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("")}</select>`)}
+        </div>
+        <div class="pw-row">${field("รายละเอียด", `<input id="qcDetail" placeholder="รายละเอียดที่ตรวจพบ" style="min-width:320px">`)}</div>
+        <div class="pw-save-bar"><button type="button" class="action-button primary" data-add-qc>บันทึก QC</button></div>
+        ${qcRowsHtml(state.designId, state.lineIdx)}
+      </div>
+    </section>`;
+  }
+
+  /* ---------------- Tab 3: หน้าจอทอ (ภาพรวม) ---------------- */
+  function boardTabHtml() {
+    const refs = allPieceRefs();
+    if (!refs.length) return `<p class="col-empty">ยังไม่มีจอทอที่ตั้งค่าไว้ — ไปที่แท็บ “ตั้งค่าขึ้นทอ” ก่อน</p>`;
+    const byLoom = [...refs].sort((a, b) => String(a.piece.loomNo || "999").localeCompare(String(b.piece.loomNo || "999"), "th", { numeric: true }));
+    return `<div class="pw-job-grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">${byLoom.map((r) => {
+      const dates = sortedDates(r.piece);
+      const lastIso = dates[dates.length - 1];
+      const lastDay = lastIso ? r.piece.days[lastIso] : null;
+      const done = pieceDoneTotal(r.piece), remain = Math.max(0, r.totalArea - done);
+      const workersToday = lastDay ? new Set([...(lastDay.normal.workers || []), ...(lastDay.ot.workers || [])]) : new Set();
+      return `<div class="department-panel pw-card" style="margin-bottom:0">
+        <div class="pw-body">
+          <div class="pw-row"><div class="pr main"><small>จอที่</small><strong>${esc(r.piece.loomNo || "ยังไม่ระบุ")}</strong></div>${res("M/O", esc(r.plan.moNo || r.designId))}${res("เกรด", esc(r.grade))}</div>
+          ${r.piece.patternImage ? `<img src="${r.piece.patternImage}" style="max-width:100%;max-height:110px;border:1px solid var(--line);margin:4px 0">` : ""}
+          <div class="pw-row">${res("ชิ้น", esc(r.line.location || "-"))}${res("คงเหลือ", `${fmt(remain, 2)} ตร.ม.`, remain <= 0.0005 ? "main" : "")}</div>
+          <div class="pw-row">${res("บันทึกล่าสุด", lastIso ? thaiDate(lastIso) : "ยังไม่บันทึก")}${res("คนทอล่าสุด", `${workersToday.size} คน`)}</div>
+          <div class="pw-save-bar">
+            <button type="button" class="action-button primary" data-transfer-glue="${esc(r.designId)}" data-transfer-line="${esc(r.lineIdx)}" ${remain > 0.0005 ? "disabled" : ""}>โอนให้แผนกทากาวตกแต่ง</button>
+            ${r.piece.transferredToGlueAt ? `<small>โอนแล้ว ${new Date(r.piece.transferredToGlueAt).toLocaleString("th-TH")}</small>` : `<small>${remain > 0.0005 ? "ทอยังไม่เสร็จ" : "ยังไม่โอน"}</small>`}
+          </div>
+        </div>
+      </div>`;
+    }).join("")}</div>`;
+  }
+
+  /* ---------------- Tab 4: สรุป/ส่งออก/แจ้งเตือน ---------------- */
+  function gradeSummaryTableHtml(sum) {
+    const grades = (PE().WEAVE_GRADES || []).map((g) => g.grade);
+    return `<table class="calc-table"><thead><tr><th>เกรด</th><th class="num">ตร.ม.</th><th class="num">ชั่วโมง</th></tr></thead><tbody>
+      ${grades.map((g) => `<tr><td>${esc(g)}</td><td class="num">${fmt((sum.gradeTotals[g] || { sqm: 0 }).sqm, 2)}</td><td class="num">${fmt((sum.gradeTotals[g] || { hours: 0 }).hours, 1)}</td></tr>`).join("")}
+    </tbody></table>`;
+  }
+
+  function yarnReqRowHtml(r) {
+    return `<tr data-yreq="${r.id}">
+      <td>${esc(r.designId)}</td><td>${esc(r.label)}</td><td class="num">${fmt(r.requestedKg, 3)} กก.</td><td>${esc(r.neededDate ? thaiDate(r.neededDate) : "-")}</td><td>${esc(r.reason)}</td>
+      <td>${r.resolved ? `<span class="status-tag">ออกใบสั่งย้อมแล้ว</span>` : `<span class="status-tag review">รอแผนกวางแผน</span>`}</td>
+      <td>${r.resolved ? esc(r.approver || "-") : `<input data-yreq-approver="${r.id}" placeholder="ผู้อนุมัติสั่งย้อม" value="${esc(r.approver)}" class="pw-num tiny">`}</td>
+      <td>${r.resolved ? "" : `<button type="button" class="action-button primary" data-yreq-resolve="${r.id}">แผนกวางแผนออกใบสั่งย้อมแล้ว</button>`}</td>
+    </tr>`;
+  }
+
+  function reportTabHtml() {
+    const sum = daySummary(state.day);
+    const notify = loadNotify().slice().reverse().slice(0, 10);
+    const reqs = loadYarnRequests().slice().reverse();
+    const message = `รายงานการทอประจำวัน ${thaiDate(state.day)}\nรวมพื้นที่: ${fmt(sum.totalSqm, 2)} ตร.ม. (ปกติ ${fmt(sum.normalSqm, 2)} + โอที ${fmt(sum.otSqm, 2)})\nชั่วโมงรวม: ${fmt(sum.totalHours, 1)} ชม. | ประสิทธิภาพ: ${fmt(sum.eff, 3)} ตรม./คน/ชม.\nพนักงานทอวันนี้: ${sum.headcount} คน (ปกติ ${sum.normalHeadcount} · โอที ${sum.otHeadcount})`;
+    return `
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>สรุปประจำวัน</strong><small>เลือกวันที่เพื่อดูสรุป — รวมทุกจอที่บันทึกในวันนั้น</small></div></div>
+      <div class="pw-body">
+        <div class="pw-row">${field("วันที่", `<input type="date" id="repDayPicker" value="${esc(state.day)}">`)}</div>
+        <div class="pw-res-row">${res("รวมพื้นที่ (ปกติ)", `${fmt(sum.normalSqm, 2)} ตร.ม.`)}${res("รวมพื้นที่ (โอที)", `${fmt(sum.otSqm, 2)} ตร.ม.`)}${res("รวมพื้นที่ทั้งวัน", `${fmt(sum.totalSqm, 2)} ตร.ม.`, "main")}${res("ประสิทธิภาพรวม", fmt(sum.eff, 3))}${res("พนักงานทอวันนี้", `${sum.headcount} คน`)}</div>
+        <label class="pf" style="margin-top:8px">แยกตามเกรด</label>
+        ${gradeSummaryTableHtml(sum)}
+      </div>
+    </section>
+
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>คำขอไหมเพิ่ม (ส่งแผนกวางแผนออกใบสั่งย้อม)</strong><small>เมื่อสีใดไหมไม่พอ กดปุ่ม “ขอไหมเพิ่ม” ในแท็บตั้งค่าขึ้นทอ — รายการจะมาแสดงที่นี่และในหน้า Planning</small></div></div>
+      <div class="pw-body">
+        ${reqs.length ? `<table class="calc-table"><thead><tr><th>M/O (Design)</th><th>หม้อย้อม/สี</th><th class="num">ขอเพิ่ม</th><th>ต้องการภายใน</th><th>เหตุผล</th><th>สถานะ</th><th>ผู้อนุมัติสั่งย้อม</th><th></th></tr></thead><tbody>${reqs.map(yarnReqRowHtml).join("")}</tbody></table>` : `<p class="col-empty">ยังไม่มีคำขอไหมเพิ่ม</p>`}
+      </div>
+    </section>
+
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>ส่งออก / นำเข้า Excel</strong><small>รูปแบบตรงกับ “รายงานการผลิตประจำวันพรมทอมือ” — ส่งออกได้ทันที / นำเข้าไฟล์เดือนก่อนหน้าเพื่อย้อนกลับข้อมูล (จับคู่ด้วยเลข M/O)</small></div></div>
+      <div class="pw-body">
+        <div class="pw-row">
+          ${field("เดือนที่ส่งออก", `<input type="month" id="exportMonth" value="${esc(state.day.slice(0, 7))}">`)}
+          <button type="button" class="action-button primary" data-export-excel>ส่งออก Excel</button>
+        </div>
+        <div class="pw-row" style="margin-top:8px">
+          ${field("นำเข้าไฟล์ Excel (รูปแบบรายงานการผลิตประจำวันพรมทอมือ)", `<input type="file" id="importExcelFile" accept=".xlsx,.xls">`)}
+          <button type="button" class="action-button" data-import-excel>นำเข้า</button>
+        </div>
+        <p style="color:var(--muted);font-size:10px;margin:6px 2px 0">นำเข้าได้เฉพาะแถวที่จับคู่เลข M/O กับข้อมูลในระบบนี้ได้เท่านั้น (เทียบจากเลขที่ M/O ในหน้ารายงานขาย) แถวที่จับคู่ไม่ได้จะถูกข้ามและสรุปจำนวนให้หลังนำเข้า</p>
+      </div>
+    </section>
+
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>แจ้งเตือนเข้า LINE</strong><small>สร้างข้อความสรุปประจำวันสำหรับส่งเข้ากลุ่ม LINE — ระบบนี้ยังไม่ได้เชื่อมต่อ LINE Notify/Messaging API จริง (ต้องใช้ Token ของบริษัท) จึงทำได้แค่สร้างข้อความ + คัดลอก/บันทึกประวัติเท่านั้น</small></div></div>
+      <div class="pw-body">
+        <textarea id="lineMessage" rows="5" style="width:100%;font:inherit;padding:8px;border:1px solid var(--line)">${esc(message)}</textarea>
+        <div class="pw-save-bar">
+          <button type="button" class="action-button" data-copy-line>คัดลอกข้อความ</button>
+          <button type="button" class="action-button primary" data-log-line>บันทึกว่าส่งแล้ว</button>
+        </div>
+        ${notify.length ? `<table class="calc-table" style="margin-top:8px"><thead><tr><th>วันที่รายงาน</th><th>ข้อความ</th><th>บันทึกเมื่อ</th></tr></thead><tbody>${notify.map((n) => `<tr><td>${thaiDate(n.date)}</td><td style="white-space:pre-line">${esc(n.message)}</td><td>${new Date(n.sentAt).toLocaleString("th-TH")}</td></tr>`).join("")}</tbody></table>` : `<p class="col-empty">ยังไม่มีประวัติแจ้งเตือน</p>`}
+      </div>
+    </section>`;
+  }
+
+  /* ============================================================
+     Excel Export
+     ============================================================ */
+  function exportExcel(month) {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const dates = allLoggedDates().filter((d) => d.startsWith(month));
+    if (!dates.length) { toast(`ไม่มีข้อมูลบันทึกในเดือน ${month}`); return; }
+    const header1 = ["วันที่", "จอที่", "M/O", "คุณภาพ", "เกรด", "ชิ้นที่", "กว้าง X ยาว", "พื้นที่",
+      "ปกติ:คงเหลือยกมา", "ปกติ:พ.ท.ทำได้", "ปกติ:คงเหลือ", "ปกติ:จำนวนพนักงาน", "ปกติ:เริ่ม", "ปกติ:เลิก", "ปกติ:จำนวนชม.", "ปกติ:ประสิทธิภาพ", "ปกติ:รายชื่อพนักงาน",
+      "โอที:คงเหลือยกมา", "โอที:พ.ท.ทำได้", "โอที:คงเหลือ", "โอที:จำนวนพนักงาน", "โอที:เริ่ม", "โอที:เลิก", "โอที:จำนวนชม.", "โอที:ประสิทธิภาพ", "โอที:รายชื่อพนักงาน",
+      "รวมพื้นที่/วัน", "รวมชั่วโมง/วัน", "ประสิทธิภาพรวม", "ตารางเมตรคงเหลือ"];
+    const rows = [header1];
+    const refs = allPieceRefs();
+    refs.forEach((r) => {
+      dates.forEach((iso) => {
+        const day = r.piece.days[iso];
+        if (!day) return;
+        const carryN = dayCarryNormal(r.piece, iso, r.totalArea), carryOt = dayCarryOt(r.piece, iso, r.totalArea), remain = dayRemaining(r.piece, iso, r.totalArea);
+        const nMh = shiftManHours(day.normal), oMh = shiftManHours(day.ot);
+        const nSqm = num(day.normal.doneSqm), oSqm = num(day.ot.doneSqm);
+        rows.push([iso, r.piece.loomNo || "", r.plan.moNo || r.designId, r.line.quality || "", r.grade, r.line.location || "-", "", r.totalArea,
+          carryN, nSqm || "", carryN - nSqm, (day.normal.workers || []).length || "", day.normal.start, day.normal.end, nMh || "", nMh > 0 ? nSqm / nMh : "", (day.normal.workers || []).join(", "),
+          carryOt, oSqm || "", carryOt - oSqm, (day.ot.workers || []).length || "", day.ot.start, day.ot.end, oMh || "", oMh > 0 ? oSqm / oMh : "", (day.ot.workers || []).join(", "),
+          nSqm + oSqm, nMh + oMh, (nMh + oMh) > 0 ? (nSqm + oSqm) / (nMh + oMh) : "", remain]);
+      });
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), month);
+    // สรุปแยกตามเกรด รวมทั้งเดือน
+    const gradeTotals = {};
+    dates.forEach((iso) => { const s = daySummary(iso); Object.keys(s.gradeTotals).forEach((g) => { if (!gradeTotals[g]) gradeTotals[g] = { sqm: 0, hours: 0 }; gradeTotals[g].sqm += s.gradeTotals[g].sqm; gradeTotals[g].hours += s.gradeTotals[g].hours; }); });
+    const gradeRows = [["เกรด", "ตร.ม.", "ชั่วโมง"], ...(PE().WEAVE_GRADES || []).map((g) => [g.grade, (gradeTotals[g.grade] || { sqm: 0 }).sqm, (gradeTotals[g.grade] || { hours: 0 }).hours])];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(gradeRows), "สรุปเกรด");
+    XLSX.writeFile(wb, `weaving-daily-production-${month}.xlsx`);
+    toast(`ส่งออก Excel เดือน ${month} แล้ว (${dates.length} วัน)`);
+  }
+
+  /* ============================================================
+     Excel Import — จับคู่ M/O กับ SalesEngine เพื่อหา designId
+     รองรับตารางแบบแถวเดียวต่อวัน/จอ (เหมือนชีตสรุปรายเดือน) คอลัมน์ตามที่ export ไว้ หรือไฟล์รายงานต้นฉบับ (ชีต SEP)
+     ============================================================ */
+  function findDesignIdByMoNo(moNo) {
+    try {
+      if (typeof SalesEngine === "undefined" || !SalesEngine.getDocs) return null;
+      const norm = String(moNo || "").trim().toLowerCase();
+      if (!norm) return null;
+      const doc = SalesEngine.getDocs().find((d) => String(d.no || "").trim().toLowerCase() === norm);
+      return doc ? doc.designId : null;
+    } catch (e) { return null; }
+  }
+
+  async function importExcel(file) {
+    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    let imported = 0, skippedNoMatch = 0, skippedNoDate = 0;
+    const unmatched = new Set();
+    wb.SheetNames.forEach((sheetName) => {
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "", raw: true });
+      aoa.forEach((row) => {
+        const dateCell = row[0];
+        let iso = null;
+        if (dateCell instanceof Date) iso = dateCell.toISOString().slice(0, 10);
+        else if (typeof dateCell === "number" && dateCell > 20000) { const d = XLSX.SSF ? XLSX.SSF.parse_date_code(dateCell) : null; if (d) iso = `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`; }
+        else if (typeof dateCell === "string" && /^\d{4}-\d{2}-\d{2}/.test(dateCell)) iso = dateCell.slice(0, 10);
+        const moNo = row[2];
+        if (!has(moNo) || String(moNo).toLowerCase().includes("m/o")) return; // ข้ามหัวตาราง
+        if (!iso) { skippedNoDate++; return; }
+        const designId = findDesignIdByMoNo(moNo);
+        if (!designId) { skippedNoMatch++; unmatched.add(String(moNo)); return; }
+        const plan = planFor(designId);
+        if (!plan) { skippedNoMatch++; unmatched.add(String(moNo)); return; }
+        const dfloor = ensureDesignFloor(designId);
+        const lines = linesOf(designId, plan);
+        let lineIdx = lines.findIndex((l) => (l.location || "").trim() === String(row[5] || "").trim());
+        if (lineIdx < 0) lineIdx = 0;
+        const piece = ensurePieceRec(dfloor, lineIdx);
+        if (!piece.loomNo && has(row[1])) piece.loomNo = String(row[1]);
+        const day = ensureDayRec(piece, iso);
+        // คอลัมน์ตามฟอร์แมต SEP: 8=คงเหลือยกมา(ปกติ) 9=พ.ท.ทำได้ 11=จำนวนพนักงาน 12=เริ่ม 13=เลิก 17=รายชื่อ ; OT: 18.. 27=รายชื่อ
+        if (has(row[9])) day.normal.doneSqm = num(row[9]);
+        if (has(row[12])) day.normal.start = String(row[12]);
+        if (has(row[13])) day.normal.end = String(row[13]);
+        if (has(row[17])) day.normal.workers = String(row[17]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+        if (has(row[19])) day.ot.doneSqm = num(row[19]);
+        if (has(row[22])) day.ot.start = String(row[22]);
+        if (has(row[23])) day.ot.end = String(row[23]);
+        if (has(row[27])) day.ot.workers = String(row[27]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+        saveDesignFloor(designId, dfloor);
+        imported++;
+      });
+    });
+    toast(`นำเข้าเสร็จ: บันทึก ${imported} แถว · ข้าม (ไม่พบ M/O ที่ตรงกัน) ${skippedNoMatch} แถว · ข้าม (อ่านวันที่ไม่ได้) ${skippedNoDate} แถว`);
+    if (unmatched.size) console.warn("[weave-floor import] ไม่พบ M/O ที่ตรงกันในระบบ:", [...unmatched].slice(0, 30));
+    renderAll();
+  }
+
+  /* ============================================================
+     Render / Bind
+     ============================================================ */
+  function resizeImageToDataUrl(file, maxW, cb) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        cb(canvas.toDataURL("image/jpeg", 0.6));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function build() {
+    const root = $("#weavefloorView");
+    root.innerHTML = `
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">WEAVING FLOOR</p>
+          <h1>แผนกทอ — จอทอรายวัน</h1>
+          <p class="subtitle">ขึ้นทอต่อจอ/ชิ้น → บันทึกผลผลิตประจำวัน (ปกติ/โอที) → ปรับปืน/QC ต่อจอ → สรุปเกรด/ส่งออก Excel/แจ้งเตือน LINE</p>
+        </div>
+      </section>
+      ${tabBar()}
+      <section class="department-panel pw-card">
+        <div class="panel-heading"><div><strong>เลือก M/O</strong><small>ผ้าใบต้องพร้อมก่อน (ติ๊กในหน้า “ส่งแผนกทอ”) — ไหมพร้อมได้ทีละสี</small></div></div>
+        <div class="pw-body" id="wfJobPicker"></div>
+      </section>
+      <div id="wfTabBody"></div>`;
+  }
+
+  function renderAll() {
+    if (state.tab !== "board") $("#wfJobPicker").closest("section").style.display = "";
+    else $("#wfJobPicker").closest("section").style.display = "none";
+    $("#wfJobPicker").innerHTML = jobPickerHtml("wfpick");
+    let html = "";
+    if (state.tab === "setup") html = setupTabHtml();
+    else if (state.tab === "daily") html = dailyTabHtml();
+    else if (state.tab === "board") html = boardTabHtml();
+    else if (state.tab === "report") html = reportTabHtml();
+    $("#wfTabBody").innerHTML = html;
+    $$(".view-btn[data-wftab]").forEach((b) => b.classList.toggle("active", b.dataset.wftab === state.tab));
+  }
+
+  let built = false;
+  function renderWeaveFloor() {
+    if (!built) { build(); built = true; bind(); }
+    renderAll();
+  }
+
+  function bind() {
+    const root = $("#weavefloorView");
+    root.addEventListener("click", (e) => {
+      const tabBtn = e.target.closest("[data-wftab]");
+      if (tabBtn) { state.tab = tabBtn.dataset.wftab; if (state.tab !== "daily") state.lineIdx = null; renderAll(); return; }
+      const pick = e.target.closest("[data-wfpick]");
+      if (pick) { state.designId = pick.dataset.wfpick; state.lineIdx = null; renderAll(); return; }
+      const lpick = e.target.closest("[data-lpick]");
+      if (lpick) { state.lineIdx = lpick.dataset.lpick; renderAll(); return; }
+      const clearImg = e.target.closest("[data-pf-clear-image]");
+      if (clearImg) {
+        const idx = clearImg.closest("[data-piece]").dataset.piece;
+        const dfloor = ensureDesignFloor(state.designId);
+        ensurePieceRec(dfloor, idx).patternImage = "";
+        saveDesignFloor(state.designId, dfloor);
+        renderAll(); return;
+      }
+      const reqYarn = e.target.closest("[data-request-yarn]");
+      if (reqYarn) {
+        const potKey = reqYarn.dataset.requestYarn, label = reqYarn.dataset.requestLabel;
+        const kg = prompt(`ขอไหมเพิ่มสำหรับ "${label}" — ต้องการเพิ่มกี่กิโลกรัม?`);
+        if (kg === null || !has(kg)) return;
+        const reason = prompt("เหตุผลที่ต้องขอไหมเพิ่ม (เช่น สั่งย้อมขาดจาก spec, ทอเสียเพิ่ม ฯลฯ)") || "";
+        const neededDate = prompt("ต้องการภายในวันที่ (YYYY-MM-DD, เว้นว่างได้)") || "";
+        addYarnRequest({ designId: state.designId, potKey, label, requestedKg: num(kg), reason, neededDate });
+        toast("บันทึกคำขอไหมเพิ่มแล้ว — แผนกวางแผนจะเห็นในหน้า Planning และแท็บสรุป/ส่งออก");
+        renderAll(); return;
+      }
+      const resolveReq = e.target.closest("[data-yreq-resolve]");
+      if (resolveReq) {
+        const id = resolveReq.dataset.yreqResolve;
+        const row = resolveReq.closest("[data-yreq]");
+        const approverInput = row.querySelector("[data-yreq-approver]");
+        const approver = approverInput ? approverInput.value : "";
+        if (!has(approver)) { toast("กรอกชื่อผู้อนุมัติสั่งย้อมก่อน"); return; }
+        updateYarnRequest(id, { resolved: true, resolvedAt: new Date().toISOString(), approver });
+        toast("บันทึกแล้ว: แผนกวางแผนออกใบสั่งย้อมเพิ่มแล้ว");
+        renderAll(); return;
+      }
+      const addGun = e.target.closest("[data-add-gun]");
+      if (addGun) {
+        const dfloor = ensureDesignFloor(state.designId);
+        const piece = ensurePieceRec(dfloor, state.lineIdx);
+        const day = ensureDayRec(piece, state.day);
+        day.gunAdjust.push({ shift: "normal", start: "10:00", end: "10:15", technician: "", reason: "" });
+        saveDesignFloor(state.designId, dfloor);
+        renderAll(); return;
+      }
+      const rmGun = e.target.closest("[data-remove-gun]");
+      if (rmGun) {
+        const dfloor = ensureDesignFloor(state.designId);
+        const piece = ensurePieceRec(dfloor, state.lineIdx);
+        const day = ensureDayRec(piece, state.day);
+        day.gunAdjust.splice(Number(rmGun.dataset.removeGun), 1);
+        saveDesignFloor(state.designId, dfloor);
+        renderAll(); return;
+      }
+      const addQcBtn = e.target.closest("[data-add-qc]");
+      if (addQcBtn) {
+        const dfloor = ensureDesignFloor(state.designId);
+        const piece = ensurePieceRec(dfloor, state.lineIdx);
+        const inspector = $("#qcInspector").value, result = $("#qcResult").value, detail = $("#qcDetail").value, date = $("#qcDate").value || state.day;
+        if (!has(inspector)) { toast("กรอกชื่อผู้ตรวจ QC ก่อน"); return; }
+        addQc({ designId: state.designId, lineIdx: state.lineIdx, loomNo: piece.loomNo, dept: "weaving", date, inspector, result, detail });
+        toast("บันทึก QC แล้ว");
+        renderAll(); return;
+      }
+      const transferBtn = e.target.closest("[data-transfer-glue]");
+      if (transferBtn && !transferBtn.disabled) {
+        const designId = transferBtn.dataset.transferGlue, lineIdx = transferBtn.dataset.transferLine;
+        const dfloor = ensureDesignFloor(designId);
+        const piece = ensurePieceRec(dfloor, lineIdx);
+        piece.transferredToGlueAt = new Date().toISOString();
+        saveDesignFloor(designId, dfloor);
+        toast(`${designId}: โอนให้แผนกทากาวตกแต่งแล้ว`);
+        renderAll(); return;
+      }
+      const copyLine = e.target.closest("[data-copy-line]");
+      if (copyLine) {
+        const msg = $("#lineMessage").value;
+        try { navigator.clipboard.writeText(msg); toast("คัดลอกข้อความแล้ว"); } catch (err) { toast("คัดลอกไม่สำเร็จ — เลือกข้อความแล้วคัดลอกเองได้"); }
+        return;
+      }
+      const logLine = e.target.closest("[data-log-line]");
+      if (logLine) {
+        logNotify(state.day, $("#lineMessage").value);
+        toast("บันทึกประวัติแจ้งเตือนแล้ว (ยังไม่ได้ส่งเข้า LINE จริง — ต้องเชื่อมต่อ LINE Notify/Messaging API ด้วย Token ของบริษัทก่อน)");
+        renderAll(); return;
+      }
+      const exportBtn = e.target.closest("[data-export-excel]");
+      if (exportBtn) { exportExcel($("#exportMonth").value); return; }
+      const importBtn = e.target.closest("[data-import-excel]");
+      if (importBtn) {
+        const f = $("#importExcelFile").files[0];
+        if (!f) { toast("เลือกไฟล์ก่อน"); return; }
+        importExcel(f);
+        return;
+      }
+    });
+
+    root.addEventListener("change", (e) => {
+      const pf = e.target.closest("[data-pf]");
+      if (pf) {
+        const idx = pf.closest("[data-piece]").dataset.piece;
+        const dfloor = ensureDesignFloor(state.designId);
+        const piece = ensurePieceRec(dfloor, idx);
+        if (pf.dataset.pf === "patternImageFile") {
+          const file = pf.files[0];
+          if (file) resizeImageToDataUrl(file, 320, (dataUrl) => { piece.patternImage = dataUrl; saveDesignFloor(state.designId, dfloor); renderAll(); });
+          return;
+        }
+        piece[pf.dataset.pf] = pf.value;
+        saveDesignFloor(state.designId, dfloor);
+        renderAll(); return;
+      }
+      const potdraw = e.target.closest("[data-potdraw]");
+      if (potdraw && e.target.name === "drawKg") {
+        const dfloor = ensureDesignFloor(state.designId);
+        const potKey = potdraw.dataset.potdraw;
+        if (!dfloor.yarnDraw[potKey]) dfloor.yarnDraw[potKey] = {};
+        dfloor.yarnDraw[potKey][state.day] = e.target.value;
+        saveDesignFloor(state.designId, dfloor);
+        renderAll(); return;
+      }
+      const check = e.target.closest("[data-check]");
+      if (check) {
+        const shiftName = check.dataset.check;
+        const dfloor = ensureDesignFloor(state.designId);
+        const piece = ensurePieceRec(dfloor, state.lineIdx);
+        const day = ensureDayRec(piece, state.day);
+        const set = new Set(day[shiftName].workers || []);
+        if (check.checked) set.add(check.value); else set.delete(check.value);
+        day[shiftName].workers = Array.from(set);
+        saveDesignFloor(state.designId, dfloor);
+        renderAll(); return;
+      }
+      const shiftField = e.target.closest("[data-shift]");
+      if (shiftField) {
+        const dfloor = ensureDesignFloor(state.designId);
+        const piece = ensurePieceRec(dfloor, state.lineIdx);
+        const day = ensureDayRec(piece, state.day);
+        day[shiftField.dataset.shift][shiftField.dataset.field] = shiftField.value;
+        saveDesignFloor(state.designId, dfloor);
+        renderAll(); return;
+      }
+      const gunRow = e.target.closest("[data-gun]");
+      if (gunRow) {
+        const dfloor = ensureDesignFloor(state.designId);
+        const piece = ensurePieceRec(dfloor, state.lineIdx);
+        const day = ensureDayRec(piece, state.day);
+        day.gunAdjust[Number(gunRow.dataset.gun)][e.target.name] = e.target.value;
+        saveDesignFloor(state.designId, dfloor);
+        renderAll(); return;
+      }
+      if (e.target.id === "wfDayPicker" || e.target.id === "repDayPicker") { state.day = e.target.value; renderAll(); return; }
+    });
+
+    root.addEventListener("input", (e) => {
+      const gunRow = e.target.closest("[data-gun]");
+      if (gunRow && (e.target.name === "technician" || e.target.name === "reason")) {
+        const dfloor = ensureDesignFloor(state.designId);
+        const piece = ensurePieceRec(dfloor, state.lineIdx);
+        const day = ensureDayRec(piece, state.day);
+        day.gunAdjust[Number(gunRow.dataset.gun)][e.target.name] = e.target.value;
+        saveDesignFloor(state.designId, dfloor);
+        return;
+      }
+    });
+  }
+
+  window.renderWeaveFloor = renderWeaveFloor;
+
+  /* ============================================================
+     QC Dashboard — หน้ารายงาน QC รวมทุกจอ
+     ============================================================ */
+  function qcDashboardHtml() {
+    const list = loadQc().slice().sort((a, b) => b.date.localeCompare(a.date));
+    const total = list.length, pass = list.filter((q) => q.result === "ผ่าน").length, fail = list.filter((q) => q.result === "ไม่ผ่าน").length, note = list.filter((q) => q.result === "มีข้อสังเกต").length;
+    const deptLabel = (d) => d === "finishing" ? "แผนกทากาวตกแต่ง" : "แผนกทอ";
+    return `
+    <section class="page-heading">
+      <div><p class="eyebrow">QC DASHBOARD</p><h1>รายงาน QC ทุกแผนก</h1><p class="subtitle">รวมผลตรวจ QC ของแผนกทอ (ต่อจอ) และแผนกทากาวตกแต่ง (ต่อชิ้น) ทุก M/O — บันทึกได้จากแท็บ “บันทึกประจำวัน” ในหน้าแผนกทอ และจากหน้าแผนกทากาวตกแต่ง</p></div>
+    </section>
+    <div class="summary-cards workflow-cards">
+      <div class="summary-card"><small>ตรวจทั้งหมด</small><strong>${total}</strong><span>รายการ</span></div>
+      <div class="summary-card"><small>ผ่าน</small><strong>${pass}</strong><span>${total ? fmt(pass / total * 100, 0) : 0}%</span></div>
+      <div class="summary-card"><small>ไม่ผ่าน</small><strong>${fail}</strong><span>${total ? fmt(fail / total * 100, 0) : 0}%</span></div>
+      <div class="summary-card"><small>มีข้อสังเกต</small><strong>${note}</strong><span>${total ? fmt(note / total * 100, 0) : 0}%</span></div>
+    </div>
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>ประวัติการตรวจ QC ทั้งหมด</strong></div></div>
+      <div class="pw-body">
+        ${list.length ? `<table class="calc-table"><thead><tr><th>วันที่ตรวจ</th><th>แผนก</th><th>M/O (Design)</th><th>จอ/ชิ้น</th><th>ผู้ตรวจ</th><th>ผล</th><th>รายละเอียด</th></tr></thead><tbody>${list.map((q) => {
+      const plan = planFor(q.designId);
+      return `<tr><td>${thaiDate(q.date)}</td><td>${esc(deptLabel(q.dept))}</td><td>${esc(plan ? (plan.moNo || q.designId) : q.designId)}</td><td>${esc(q.loomNo || q.lineIdx || "-")}</td><td>${esc(q.inspector)}</td><td><span class="status-tag ${q.result === "ไม่ผ่าน" ? "blocked" : q.result === "มีข้อสังเกต" ? "review" : ""}">${esc(q.result)}</span></td><td>${esc(q.detail)}</td></tr>`;
+    }).join("")}</tbody></table>` : `<p class="col-empty">ยังไม่มีประวัติ QC</p>`}
+      </div>
+    </section>`;
+  }
+  function renderQcDashboard() { $("#qcdashView").innerHTML = qcDashboardHtml(); }
+  window.renderQcDashboard = renderQcDashboard;
+})();
