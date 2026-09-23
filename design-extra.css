@@ -3,3 +3,7 @@
 #designView .text-button{border:0;background:none;color:var(--teal);font-weight:900;cursor:pointer;font-size:10px;padding:0}
 .design-del-btn{color:#b3413a!important}
 .designer-kpi-controls{display:flex;align-items:end;gap:10px}.designer-kpi-controls label{display:grid;gap:4px;color:var(--muted);font-size:9px;font-weight:900}.designer-kpi-controls select{min-width:150px;padding:7px;border:1px solid var(--line);background:#fff;font:inherit}.designer-kpi-controls>span{padding-bottom:7px}@media(max-width:900px){.designer-kpi-controls{justify-content:space-between;margin-top:10px}}@media(max-width:520px){.designer-kpi-controls{display:block}.designer-kpi-controls select{width:100%}.designer-kpi-controls>span{display:block;margin-top:6px}}
+.design-photo-cell{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:64px}
+.design-photo-cell .dept-row-photo,.design-photo-cell .dept-row-photo-empty{width:44px;height:44px}
+.file-picker.mini{padding:4px 6px;font-size:9px}
+.design-photo-cell .text-button{border:0;background:none;color:var(--red);cursor:pointer;font-size:9px;padding:0}

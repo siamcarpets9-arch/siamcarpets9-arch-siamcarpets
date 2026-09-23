@@ -1072,7 +1072,15 @@ function renderDesign(){
     ["งานรับเข้า",received,"รายการที่มีวันที่รับงาน",""],["ส่งงานแล้ว",completed,`${received?((completed/received)*100).toFixed(1):0}% ของงานรับเข้า`,""],["งานค้าง",Math.max(0,received-completed),"ยังไม่มีวันที่ส่งงาน",""],["งานเกินกำหนด",overdue,"ยังไม่ส่งและเกิน Due Date",overdue?"risk":""],["Lead time เฉลี่ย",avgLead,"จากวันที่รับถึงส่งงาน",""],["Designer ที่มีงาน",designers,"จำนวนผู้รับผิดชอบ",""]
   ].map(([label,value,note,kind])=>`<article class="design-kpi ${kind}"><small>${label}</small><strong>${value}</strong><span>${note}</span></article>`).join("");
   renderDesignerKpi();
-  $("#designTable").innerHTML=rows.map((row)=>`<tr>
+  $("#designTable").innerHTML=rows.map((row)=>{
+    const DP=window.DesignPhotoStore;
+    const photo=DP&&typeof DP.getDesignPhoto==="function"?DP.getDesignPhoto(row.id):"";
+    return `<tr>
+    <td class="design-photo-cell">
+      ${photo?`<img class="dept-row-photo" src="${photo}" alt="">`:`<span class="dept-row-photo-empty">ไม่มีรูป</span>`}
+      <label class="file-picker mini">${photo?"เปลี่ยนรูป":"อัปโหลดรูป"}<input type="file" accept="image/*" data-design-photo-file="${row.id}"></label>
+      ${photo?`<button type="button" class="text-button" data-design-photo-remove="${row.id}">ลบรูป</button>`:""}
+    </td>
     <td><strong>${row.id}</strong><small>${row.owner}</small></td>
     <td><strong>${row.project}</strong><small>${row.customer}</small>${typeof salesRowExtra==="function"?salesRowExtra(row):""}</td>
     <td>${row.scope}</td><td>${row.due}</td>
@@ -1082,9 +1090,47 @@ function renderDesign(){
       <button class="action-button ${row.status==="IN REVIEW"?"primary":""}" data-approve="${row.id}" ${row.status==="APPROVED"?"disabled":""}>${row.status==="APPROVED"?"ส่งฝ่ายขายแล้ว":row.status==="IN REVIEW"?"อนุมัติแบบ":"อัปเดตแบบ"}</button>
       <button type="button" class="text-button design-del-btn" data-delete="${row.id}" title="ลบรายการนี้ทิ้ง">ลบ</button>
     </td>
-  </tr>`).join("");
+  </tr>`;
+  }).join("");
   $$("[data-approve]").forEach((button)=>button.addEventListener("click",()=>approveDesign(button.dataset.approve)));
   $$("[data-delete]").forEach((button)=>button.addEventListener("click",()=>deleteDesign(button.dataset.delete)));
+  $$("[data-design-photo-file]").forEach((input)=>input.addEventListener("change",(e)=>{
+    const file=e.target.files&&e.target.files[0];
+    if(!file) return;
+    const designId=e.target.dataset.designPhotoFile;
+    resizeImageToDataUrl(file,640,(dataUrl)=>{
+      if(window.DesignPhotoStore&&typeof window.DesignPhotoStore.setDesignPhoto==="function"){
+        window.DesignPhotoStore.setDesignPhoto(designId,dataUrl);
+        toast("แนบรูปแบบแล้ว — ใช้ร่วมกันได้ทุกแผนกทันที");
+        renderDesign();
+      }
+    });
+  }));
+  $$("[data-design-photo-remove]").forEach((button)=>button.addEventListener("click",()=>{
+    const designId=button.dataset.designPhotoRemove;
+    if(window.DesignPhotoStore&&typeof window.DesignPhotoStore.removeDesignPhoto==="function"){
+      window.DesignPhotoStore.removeDesignPhoto(designId);
+      toast("ลบรูปแบบแล้ว");
+      renderDesign();
+    }
+  }));
+}
+// ย่อรูปฝั่งไคลเอนต์ก่อนบันทึกเป็น dataURL (ใช้ร่วมกับช่องอัปโหลดรูปแบบในหน้า Design)
+function resizeImageToDataUrl(file,maxW,cb){
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    const img=new Image();
+    img.onload=()=>{
+      const scale=Math.min(1,maxW/img.width);
+      const canvas=document.createElement("canvas");
+      canvas.width=Math.round(img.width*scale);
+      canvas.height=Math.round(img.height*scale);
+      canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
+      cb(canvas.toDataURL("image/jpeg",0.75));
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
 }
 
 function renderDesignerKpi(){
