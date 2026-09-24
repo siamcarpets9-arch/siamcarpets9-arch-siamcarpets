@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="planning.css">
   <link rel="stylesheet" href="overview.css">
   <link rel="stylesheet" href="shipping.css">
+  <link rel="stylesheet" href="kpi.css">
 </head>
 <body>
   <header class="topbar">
@@ -33,12 +34,9 @@
       <button class="nav-link" data-view="weavefloor">แผนกทอ (จอทอรายวัน)</button>
       <button class="nav-link" data-view="finishing">ทากาวตกแต่ง</button>
       <button class="nav-link" data-view="qcdash">QC Dashboard</button>
-      <button class="nav-link">Production</button>
       <button class="nav-link">Dyeing</button>
-      <button class="nav-link">Weaving</button>
-      <button class="nav-link">Finishing</button>
       <button class="nav-link">Store</button>
-      <button class="nav-link">KPI</button>
+      <button class="nav-link" data-view="kpi">KPI</button>
       <button class="nav-link gold">ตั้งค่า</button>
       <a class="nav-link qc-external-link" href="qc-dashboard/index.html" target="_blank" rel="noopener" title="ระบบวางแผน/QC เดิม (Google Sheets + Apps Script) — เปิดแยกอีกแท็บ">แผน+QC (ระบบเดิม) ↗</a>
     </nav>
@@ -98,25 +96,6 @@
       <section class="kpi-panel">
         <div class="panel-heading"><div><strong>Design KPI</strong><small>คำนวณจากรายการที่นำเข้าหรือกรอกในระบบ</small></div><span id="designKpiOwner">Design Department</span></div>
         <div id="designKpiGrid" class="design-kpi-grid"></div>
-      </section>
-      <section class="designer-kpi-panel">
-        <div class="panel-heading">
-          <div><strong>KPI แยกตาม Designer</strong><small>รวมชื่อโดยไม่แยกตัวพิมพ์เล็ก-ใหญ่ และคำนวณจากวันที่ในตารางทำแบบ</small></div>
-          <div class="designer-kpi-controls">
-            <label>ช่วงเวลา
-              <select id="designerKpiPeriod">
-                <option value="all">ทุกช่วงเวลา</option>
-              </select>
-            </label>
-            <span id="designerKpiCount">0 Designer</span>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table class="designer-kpi-table">
-            <thead><tr><th>Designer</th><th>จำนวนงาน</th><th>ส่งงานแล้ว</th><th>ส่งตรงเวลา</th><th>อัตราตรงเวลา</th><th>งานค้าง</th><th>เกินกำหนด</th><th>Lead time เฉลี่ย</th><th>สถานะ</th></tr></thead>
-            <tbody id="designerKpiTable"></tbody>
-          </table>
-        </div>
       </section>
       <section class="department-panel">
         <div class="panel-heading"><div><strong>Design Request Register</strong><small>แบบต้องมีสถานะ “อนุมัติแล้ว” จึงจะส่งต่อให้ฝ่ายขายได้</small></div><label>ค้นหา<input id="designSearch" placeholder="Design No., Project หรือลูกค้า"></label></div>
@@ -382,6 +361,7 @@
     <section id="weavefloorView" class="app-view"></section>
     <section id="finishingView" class="app-view"></section>
     <section id="qcdashView" class="app-view"></section>
+    <section id="kpiView" class="app-view"></section>
   </main>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="app.js"></script>
@@ -398,6 +378,7 @@
   <script src="weaving.js"></script>
   <script src="weave-floor.js"></script>
   <script src="finishing.js"></script>
+  <script src="kpi.js"></script>
   <script src="overview.js"></script>
   <script>if (typeof setView === "function") setView("overview");</script>
 </body>

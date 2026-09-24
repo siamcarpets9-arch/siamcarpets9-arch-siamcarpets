@@ -96,106 +96,6 @@
   }
 
   /* ============================================================
-     นำเข้ารายงาน KPI ขยายลาย/เบิกผ้าใบ (ใบโอน รายเดือน)
-     ประมวลผลทุกชีตที่ชื่อมีคำว่า "ใบโอน" — จับคู่เลข M/O/S/O กับหน้ารายงานขาย เหมือนหน้าแผนกทอ (weave-floor.js importExcel)
-     คอลัมน์ (0-indexed): 0 วันที่รับ, 1 M/O No./SO No., 2 ชิ้นที่, 3 ผ้าใบหน้ากว้าง, 4 พ.ท/ตร.ม., 5 ใช้จริง/ตร.ม.,
-     6 เศษผ้า/ตร.ม., 7 จำนวน, 8 หน่วย, 9 วันที่โอน, 10 หมายเหตุ
-     ============================================================ */
-  const KEY_PATTERN_KPI = "siam-pattern-kpi"; // { [designId]: { moNo, rows:[{receivedDate,pieceNo,fabricWidth,areaSqm,usedSqm,scrapSqm,qty,unit,transferDate,note,sheet}], importedAt } }
-  function loadPatternKpi() { return readJson(KEY_PATTERN_KPI, {}); }
-  function savePatternKpi(all) { writeJson(KEY_PATTERN_KPI, all); }
-
-  // M/O ในรายงานนี้ (เช่น "148/26", "TH128/26") มักไม่มีเลข 0 นำหน้าเหมือนในหน้ารายงานขาย (เช่น "0148/26")
-  // ใช้ normalize key แบบเดียวกับหน้าแผนกทอ (weave-floor.js) เพื่อจับคู่ให้ตรงข้ามรูปแบบเหล่านี้ได้
-  function normMoKey(raw) {
-    const s = String(raw || "").trim().toUpperCase();
-    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*\/\s*0*(\d+)/);
-    if (!m) return s.replace(/\s+/g, "");
-    const [, prefix, num2, yy] = m;
-    return `${prefix}|${num2}|${yy}`;
-  }
-  function findDesignIdByMoNo(moNo) {
-    try {
-      if (typeof SalesEngine === "undefined" || !SalesEngine.getDocs) return null;
-      const key = normMoKey(moNo);
-      if (!key) return null;
-      const doc = SalesEngine.getDocs().find((d) => normMoKey(d.no) === key);
-      return doc ? doc.designId : null;
-    } catch (e) { return null; }
-  }
-  function parseExcelKpiDate(cell) {
-    if (cell instanceof Date) return cell.toISOString().slice(0, 10);
-    if (typeof cell === "number" && cell > 20000) { const d = XLSX.SSF ? XLSX.SSF.parse_date_code(cell) : null; if (d) return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`; }
-    if (typeof cell === "string" && /^\d{4}-\d{2}-\d{2}/.test(cell)) return cell.slice(0, 10);
-    return "";
-  }
-  async function importPatternKpiExcel(file) {
-    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
-    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-    const store = loadPatternKpi();
-    let imported = 0, skippedNoMatch = 0;
-    const matchedDesigns = new Set();
-    const unmatched = new Set();
-    wb.SheetNames.filter((sn) => sn.includes("ใบโอน")).forEach((sheetName) => {
-      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "", raw: true });
-      aoa.forEach((row, idx) => {
-        if (idx === 0) return; // แถวหัวตาราง
-        const moNo = row[1];
-        if (!has(moNo)) return; // ข้ามแถวว่าง
-        const designId = findDesignIdByMoNo(moNo);
-        if (!designId) { skippedNoMatch++; unmatched.add(String(moNo)); return; }
-        matchedDesigns.add(designId);
-        if (!store[designId]) store[designId] = { moNo: String(moNo), rows: [], importedAt: new Date().toISOString() };
-        store[designId].rows.push({
-          receivedDate: parseExcelKpiDate(row[0]),
-          pieceNo: row[2] == null ? "" : String(row[2]),
-          fabricWidth: has(row[3]) ? String(row[3]) : "",
-          areaSqm: num(row[4]),
-          usedSqm: num(row[5]),
-          scrapSqm: num(row[6]),
-          qty: num(row[7]),
-          unit: String(row[8] || "").trim(),
-          transferDate: parseExcelKpiDate(row[9]),
-          note: String(row[10] || "").trim(),
-          sheet: sheetName,
-        });
-        store[designId].importedAt = new Date().toISOString();
-        imported++;
-      });
-    });
-    savePatternKpi(store);
-    toast(`นำเข้าเสร็จ: บันทึก ${imported} แถว (${matchedDesigns.size} M/O) · ข้าม (ไม่พบ M/O ที่ตรงกัน) ${skippedNoMatch} แถว`);
-    if (unmatched.size) console.warn("[pattern KPI import] ไม่พบ M/O ที่ตรงกันในระบบ:", [...unmatched].slice(0, 30));
-  }
-  function patternKpiPanelHtml() {
-    return `
-    <section class="department-panel pw-card wide">
-      <div class="panel-heading"><div><strong>นำเข้ารายงาน KPI ขยายลาย/เบิกผ้าใบ</strong><small>นำเข้าไฟล์ Excel "ใบโอน" รายเดือน (ประมวลผลทุกชีตที่ชื่อมีคำว่า "ใบโอน") — จับคู่ด้วยเลข M/O/S/O No. กับข้อมูลในหน้ารายงานขาย สะสมข้อมูลทุกครั้งที่นำเข้าไฟล์ใหม่</small></div></div>
-      <div class="pw-body">
-        <div class="pw-row">
-          <label class="file-picker">นำเข้าจาก Excel<input type="file" id="ppPatternKpiFile" accept=".xlsx,.xls" data-import-pattern-kpi></label>
-        </div>
-        <div id="ppPatternKpiResults">${patternKpiResultsHtml()}</div>
-      </div>
-    </section>`;
-  }
-  function patternKpiResultsHtml() {
-    const store = loadPatternKpi();
-    const ids = Object.keys(store);
-    if (!ids.length) return `<p class="col-empty">ยังไม่มีข้อมูลนำเข้า</p>`;
-    const rows = ids.map((designId) => {
-      const rec = store[designId];
-      const list = rec.rows || [];
-      const totalArea = list.reduce((s, r) => s + num(r.areaSqm), 0);
-      const totalUsed = list.reduce((s, r) => s + num(r.usedSqm), 0);
-      const totalScrap = list.reduce((s, r) => s + num(r.scrapSqm), 0);
-      const lastTransfer = list.reduce((mx, r) => (r.transferDate && r.transferDate > mx ? r.transferDate : mx), "");
-      return `<tr><td>${esc(rec.moNo || designId)}</td><td class="num">${fmt(totalArea, 2)}</td><td class="num">${fmt(totalUsed, 2)}</td><td class="num">${fmt(totalScrap, 2)}</td><td class="num">${list.length}</td><td>${lastTransfer ? esc(lastTransfer) : "-"}</td></tr>`;
-    }).join("");
-    return `<table class="calc-table" style="margin-top:8px"><thead><tr><th>M/O</th><th class="num">พื้นที่รวม(ตร.ม.)</th><th class="num">ใช้จริงรวม(ตร.ม.)</th><th class="num">เศษผ้ารวม(ตร.ม.)</th><th class="num">จำนวนรายการ</th><th>วันที่โอนล่าสุด</th></tr></thead><tbody>${rows}</tbody></table>`;
-  }
-
-  /* ============================================================
      UI
      ============================================================ */
   function loadOrders() { return readJson(KEY_PATTERN, {}); }
@@ -354,15 +254,13 @@
         <div class="panel-heading"><div><strong>เลือก Job ที่บันทึกแผนแล้ว</strong><small>ต้องทำ "ใบวางแผนงาน" และกดบันทึกแผนก่อน</small></div></div>
         <div class="pw-body" id="ppJobPicker"></div>
       </section>
-      <div id="ppForm"></div>
-      <div id="ppPatternKpi"></div>`;
+      <div id="ppForm"></div>`;
   }
 
   function renderAll() {
     $("#ppRoster").innerHTML = rosterCardHtml();
     $("#ppJobPicker").innerHTML = jobPickerHtml();
     $("#ppForm").innerHTML = state.designId ? buildJobPanel() : `<p class="col-empty">เลือก Job ด้านบนเพื่อดูใบสั่งเจาะลาย/ขยายลาย</p>`;
-    $("#ppPatternKpi").innerHTML = patternKpiPanelHtml();
   }
 
   let built = false;
@@ -430,11 +328,6 @@
       if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-pattern-workers")) {
         const file = e.target.files && e.target.files[0];
         if (file) importPatternWorkersExcel(file).then(() => { renderAll(); e.target.value = ""; });
-        return;
-      }
-      if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-pattern-kpi")) {
-        const file = e.target.files && e.target.files[0];
-        if (file) importPatternKpiExcel(file).then(() => { renderAll(); e.target.value = ""; });
         return;
       }
       const wcb = e.target.hasAttribute && e.target.hasAttribute("data-worker-assign") ? e.target : null;

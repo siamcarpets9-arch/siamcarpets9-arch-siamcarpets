@@ -1032,7 +1032,7 @@ function setView(view){
   });
   const strip=$(".workflow-strip");if(strip) strip.classList.toggle("hidden-strip",view==="overview");
   if(view==="overview"&&typeof renderOverview==="function") renderOverview();
-  if(view==="design"){populateDesignerPeriods();renderDesign();}
+  if(view==="design") renderDesign();
   if(view==="cost"&&typeof renderCost==="function") renderCost();
   if(view==="sales") renderSales();
   if(view==="salesreport"&&typeof renderSalesReport==="function") renderSalesReport();
@@ -1046,6 +1046,7 @@ function setView(view){
   if(view==="weavefloor"&&typeof renderWeaveFloor==="function") renderWeaveFloor();
   if(view==="finishing"&&typeof renderFinishing==="function") renderFinishing();
   if(view==="qcdash"&&typeof renderQcDashboard==="function") renderQcDashboard();
+  if(view==="kpi"&&typeof renderKpi==="function") renderKpi();
 }
 
 function summaryCards(target,cards){
@@ -1053,7 +1054,6 @@ function summaryCards(target,cards){
 }
 
 function renderDesign(){
-  populateDesignerPeriods();
   const query=$("#designSearch").value.trim().toLowerCase();
   const rows=designs.filter((row)=>!query||`${row.id} ${row.project} ${row.customer}`.toLowerCase().includes(query));
   summaryCards("#designSummary",[
@@ -1071,7 +1071,6 @@ function renderDesign(){
   $("#designKpiGrid").innerHTML=[
     ["งานรับเข้า",received,"รายการที่มีวันที่รับงาน",""],["ส่งงานแล้ว",completed,`${received?((completed/received)*100).toFixed(1):0}% ของงานรับเข้า`,""],["งานค้าง",Math.max(0,received-completed),"ยังไม่มีวันที่ส่งงาน",""],["งานเกินกำหนด",overdue,"ยังไม่ส่งและเกิน Due Date",overdue?"risk":""],["Lead time เฉลี่ย",avgLead,"จากวันที่รับถึงส่งงาน",""],["Designer ที่มีงาน",designers,"จำนวนผู้รับผิดชอบ",""]
   ].map(([label,value,note,kind])=>`<article class="design-kpi ${kind}"><small>${label}</small><strong>${value}</strong><span>${note}</span></article>`).join("");
-  renderDesignerKpi();
   $("#designTable").innerHTML=rows.map((row)=>{
     const DP=window.DesignPhotoStore;
     const photo=DP&&typeof DP.getDesignPhoto==="function"?DP.getDesignPhoto(row.id):"";
@@ -1131,57 +1130,6 @@ function resizeImageToDataUrl(file,maxW,cb){
     img.src=e.target.result;
   };
   reader.readAsDataURL(file);
-}
-
-function renderDesignerKpi(){
-  const selectedPeriod=$("#designerKpiPeriod")?.value||"all";
-  const range=periodRange(selectedPeriod);
-  // KPI นี้ติดตามภาระงาน "คำขอทำแบบ" ของนักออกแบบเท่านั้น — ตัด M/O·S/O ที่เปิดงานจริงแล้ว (job==="OPENED")
-  // ออกไป เพราะไม่มีนักออกแบบ/วันที่รับงานผูกอยู่ ไม่งั้นจะไปกองรวมเป็น "ไม่ระบุ" ปนกับงานทำแบบจริง
-  const periodRows=designs.filter((row)=>row.job!=="OPENED"&&inPeriod(row.receivedDate,range));
-  const groups=new Map();
-  periodRows.forEach((row)=>{
-    const key=normalizeDesigner(row.owner||row.designer);
-    if(!groups.has(key)) groups.set(key,{name:key,total:0,submitted:0,onTime:0,pending:0,overdue:0,lead:[]});
-    const item=groups.get(key);
-    item.total+=1;
-    const received=toDate(row.receivedDate);
-    const due=toDate(row.dueDate);
-    const submitted=toDate(row.submittedDate);
-    if(submitted){
-      item.submitted+=1;
-      if(due&&submitted<=due) item.onTime+=1;
-      if(received){
-        const days=(submitted-received)/86400000;
-        if(days>=0) item.lead.push(days);
-      }
-    } else {
-      item.pending+=1;
-      if(due&&due<REPORT_DATE) item.overdue+=1;
-    }
-  });
-  const rows=[...groups.values()].sort((a,b)=>a.name.localeCompare(b.name));
-  $("#designerKpiCount").textContent=`${rows.length} Designer · ${periodRows.length} งาน`;
-  $("#designerKpiTable").innerHTML=rows.length?rows.map((row)=>{
-    const rate=row.submitted?`${(row.onTime/row.submitted*100).toFixed(1)}%`:"ไม่มีข้อมูล";
-    const avg=row.lead.length?`${(row.lead.reduce((a,b)=>a+b,0)/row.lead.length).toFixed(1)} วัน`:"ไม่มีข้อมูล";
-    const status=row.overdue?"ต้องติดตาม":row.pending?"กำลังทำ":"ตามแผน";
-    const kind=row.overdue?"blocked":row.pending?"review":"";
-    return `<tr><td class="designer-name">${row.name}</td><td>${row.total}</td><td>${row.submitted}</td><td>${row.onTime}</td><td><div class="designer-score"><span>${rate}</span>${row.submitted?`<span class="score-bar"><i style="width:${Math.min(row.onTime/row.submitted*100,100)}%"></i></span>`:""}</div></td><td>${row.pending}</td><td>${row.overdue}</td><td>${avg}</td><td>${tag(status,kind)}</td></tr>`;
-  }).join(""):`<tr><td colspan="9" class="empty-gantt">ยังไม่มีข้อมูล Designer</td></tr>`;
-}
-function populateDesignerPeriods(){
-  const select=$("#designerKpiPeriod");
-  const current=select.value||"all";
-  const years=new Set();
-  designs.forEach((row)=>{const date=toDate(row.receivedDate);if(date) years.add(date.getFullYear());});
-  years.add(2026);
-  const orderedYears=[...years].sort((a,b)=>b-a);
-  select.innerHTML=`<option value="all">ทุกช่วงเวลา</option>${orderedYears.map((year)=>`
-    <optgroup label="รายเดือน · ${year}">${monthNames.map((name,index)=>`<option value="month-${year}-${String(index+1).padStart(2,"0")}">${name} ${year}</option>`).join("")}</optgroup>
-    <optgroup label="รายไตรมาส · ${year}">${[1,2,3,4].map((quarter)=>`<option value="quarter-${year}-Q${quarter}">ไตรมาส ${quarter} · ${year}</option>`).join("")}</optgroup>
-    <option value="year-${year}">ปี ${year}</option>`).join("")}`;
-  if([...select.options].some((option)=>option.value===current)) select.value=current;
 }
 
 function approveDesign(id){
@@ -1335,7 +1283,6 @@ $("#taskRows") && $("#taskRows").addEventListener("click",(e)=>{
 
 $$(".nav-link[data-view]").forEach((button)=>button.addEventListener("click",()=>setView(button.dataset.view)));
 $("#designSearch").addEventListener("input",renderDesign);
-$("#designerKpiPeriod").addEventListener("change",renderDesignerKpi);
 $("#salesSearch").addEventListener("input",renderSales);
 $("#searchInput").addEventListener("input",renderGantt);
 $("#hideDone").addEventListener("change",renderGantt);

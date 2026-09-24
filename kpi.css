@@ -1,0 +1,6 @@
+#kpiView .text-button{border:0;background:none;color:var(--teal);font-weight:900;cursor:pointer;font-size:10px;padding:0}
+#kpiView .designer-kpi-table .text-button{color:var(--red)}
+.kpi-hidden-designers{padding:6px 14px 0;color:var(--muted);font-size:9px;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.kpi-hidden-designers:empty{display:none}
+.kpi-hidden-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;background:#f2f2f2;border:1px solid var(--line);border-radius:11px}
+.kpi-hidden-chip button{border:0;background:none;color:var(--teal);font-weight:900;font-size:9px;cursor:pointer;padding:0}
