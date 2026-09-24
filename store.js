@@ -113,15 +113,21 @@
   /* ============================================================
      2) สินค้าสำเร็จรูป — รับเข้า/ตัดออก (ดึงจากข้อมูลเดิมอัตโนมัติ)
      ============================================================ */
-  function sqmOfDesign(id) {
+  // ใช้ตัวจับคู่ doc ฝ่ายขาย <-> design record ชุดเดียวกับ OverviewEngine (เทียบ designId ก่อน แล้ว fallback ไปเทียบ
+  // เลข M/O,S/O ให้ข้อมูลเก่าที่ designId ไม่ตรง/ไม่มี ยังจับคู่ได้ถูก) กันตรรกะเพี้ยนถ้าเขียนแยกกันคนละที่
+  function docOfDesign(id) {
+    const OE = window.OverviewEngine;
+    if (OE && typeof OE.docForDesign === "function") return OE.docForDesign(id);
     const SE = window.SalesEngine;
-    const doc = SE && typeof SE.getDocs === "function" ? SE.getDocs().find((x) => x.designId === id) : null;
+    return SE && typeof SE.getDocs === "function" ? SE.getDocs().find((x) => x.designId === id) : null;
+  }
+  function sqmOfDesign(id) {
+    const doc = docOfDesign(id);
     if (!doc || !Array.isArray(doc.lines)) return 0;
     return doc.lines.reduce((t, l) => t + num(l.sqm), 0);
   }
   function moNoOfDesign(d) {
-    const SE = window.SalesEngine;
-    const doc = SE && typeof SE.getDocs === "function" ? SE.getDocs().find((x) => x.designId === d.id) : null;
+    const doc = docOfDesign(d.id);
     return (doc && doc.no) || d.moNo || "-";
   }
   function receivedDateOf(id) {

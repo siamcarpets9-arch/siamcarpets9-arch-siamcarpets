@@ -40,21 +40,42 @@
     return (typeof designs !== "undefined" ? designs : []).filter((d) => d.job === "OPENED" && !d.sample);
   }
 
+  // เลข M/O,S/O มาจากหลายแหล่ง พิมพ์ตัวคั่นปีไม่เหมือนกัน ("148/26","TH123.26","TH 123-26") — ปรับให้เทียบกันได้
+  function normMoNo(raw) {
+    const s = String(raw || "").trim().toUpperCase();
+    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*[/.-]\s*0*(\d+)/);
+    if (!m) return s.replace(/\s+/g, "");
+    const [, prefix, num2, yy] = m;
+    return `${prefix}|${num2}|${yy}`;
+  }
+
+  /* หา doc ฝ่ายขายที่ตรงกับ design record — เทียบ designId ก่อน (แม่นสุด) ถ้าไม่เจอ (เช่น ข้อมูลเก่าที่ยังค้างอยู่ใน
+     localStorage ของเบราว์เซอร์ตั้งแต่ก่อนมีช่อง designId หรือ designId ไม่ตรงกันด้วยเหตุผลอื่น) ให้ fallback ไปเทียบ
+     เลข M/O,S/O แทน กันไม่ให้ "ยืนยันส่งจริง"/ใบส่งของ ดูเหมือนไม่มีผลอะไรเลยสำหรับข้อมูลเก่าที่ยังไม่ได้อัปเดต designId */
+  function docForDesign(id) {
+    const SE = window.SalesEngine;
+    if (!SE || typeof SE.getDocs !== "function") return null;
+    const docs = SE.getDocs();
+    const byId = docs.find((x) => x.designId === id);
+    if (byId) return byId;
+    const design = (typeof designs !== "undefined" ? designs : []).find((x) => x.id === id);
+    if (!design || !design.moNo) return null;
+    const key = normMoNo(design.moNo);
+    return docs.find((x) => normMoNo(x.no) === key) || null;
+  }
+
   /* ---------- M/O vs S/O: ใช้ type จากเอกสารฝ่ายขายเป็นหลัก (แม่นสุด), ถ้าไม่เจอ fallback ดูจาก id ---------- */
   function typeOf(d) {
-    const SE = window.SalesEngine;
-    if (SE && typeof SE.getDocs === "function") {
-      const doc = SE.getDocs().find((x) => x.designId === d.id);
-      if (doc && doc.type) return doc.type === "SO" ? "SO" : "MO";
-    }
+    const doc = docForDesign(d.id);
+    if (doc && doc.type) return doc.type === "SO" ? "SO" : "MO";
     return /^SO/i.test(d.id) ? "SO" : "MO";
   }
 
-  /* วันที่ยืนยันส่งจริง (ฝ่ายขาย, ปุ่ม "ยืนยันส่ง" ในหน้ารายงานขาย) — ใช้ตัดสินว่า "จัดส่งแล้ว" หรือยัง "รอนำส่ง"
-     ใช้ได้ทั้งงานที่มีข้อมูลสดในระบบนี้ และงานที่นำเข้ามา (บางรายการมีวันที่ส่งจริงติดมากับข้อมูลนำเข้าด้วย) */
+  /* วันที่ยืนยันส่งจริง (ฝ่ายขาย, ปุ่ม "ยืนยันส่ง" ในหน้ารายงานขาย, หรือเพิ่มรายการเข้าใบส่งของในหน้า Shipping)
+     ใช้ตัดสินว่า "จัดส่งแล้ว" หรือยัง "รอนำส่ง" — ใช้ได้ทั้งงานที่มีข้อมูลสดในระบบนี้ และงานที่นำเข้ามา
+     (บางรายการมีวันที่ส่งจริงติดมากับข้อมูลนำเข้าด้วย) */
   function shipDateOf(id) {
-    const SE = window.SalesEngine;
-    const doc = SE && typeof SE.getDocs === "function" ? SE.getDocs().find((x) => x.designId === id) : null;
+    const doc = docForDesign(id);
     if (!doc || !doc.actualShip) return null;
     const raw = String(doc.actualShip).trim();
     if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10); // ISO อยู่แล้ว
@@ -74,8 +95,7 @@
 
   /* ---------- พื้นที่ (ตร.ม.) รวมของงาน — ใช้เอกสารฝ่ายขาย (บรรทัดสินค้าจริง) เป็นหลัก ---------- */
   function sqmOfDesign(id) {
-    const SE = window.SalesEngine;
-    const doc = SE && typeof SE.getDocs === "function" ? SE.getDocs().find((x) => x.designId === id) : null;
+    const doc = docForDesign(id);
     if (!doc || !Array.isArray(doc.lines)) return 0;
     return doc.lines.reduce((t, l) => t + num(l.sqm), 0);
   }
@@ -448,5 +468,5 @@
   window.renderOverview = renderOverview;
   // ให้หน้าอื่น (เช่น Store ในหน้า QC Dashboard) เรียกใช้ตรรกะ "งานไหนเสร็จแล้ว/อยู่แผนกไหน" ชุดเดียวกัน
   // แทนที่จะเขียนซ้ำ กันข้อมูลเพี้ยนถ้าตรรกะสองที่ไม่ตรงกัน
-  window.OverviewEngine = { jobs, statusOf, typeOf, shipDateOf, DEPTS };
+  window.OverviewEngine = { jobs, statusOf, typeOf, shipDateOf, docForDesign, DEPTS };
 })();
