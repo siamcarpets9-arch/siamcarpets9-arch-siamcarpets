@@ -28,7 +28,7 @@
 
   const KEY_LEDGER = "siam-store-raw-material-ledger"; // [{id,date,direction:"in"|"out",materialName,unit,qty,refNo,note,createdAt}]
 
-  const state = { fgQuery: "", fgFilter: "all" };
+  const state = { fgQuery: "", fgFilter: "all", fgSelected: new Set(), fgBulkDate: todayIso() };
 
   /* ============================================================
      1) เบิกเข้า-ออกวัตถุดิบ — บัญชีทั่วไป
@@ -137,6 +137,21 @@
     return passes.length ? passes[passes.length - 1] : null;
   }
 
+  // ตัดออกหลายรายการพร้อมกัน (สำหรับ M/O,S/O เก่าที่ส่งจริงไปแล้วในอดีต ไม่ต้องไล่กดยืนยันทีละใบ) — เขียน
+  // doc.actualShip ตรงๆ เหมือนปุ่ม "ยืนยันส่งจริง" ในหน้าขาย/การเพิ่มเข้าใบส่งของในหน้า Shipping ทุกจุดจึงอ่านค่าตรงกัน
+  function bulkMarkShipped(designIds, shipDate) {
+    const SE = window.SalesEngine;
+    if (!SE || typeof SE.getDocs !== "function") return 0;
+    const date = shipDate || todayIso();
+    let n = 0;
+    designIds.forEach((id) => {
+      const doc = docOfDesign(id);
+      if (doc) { doc.actualShip = date; n++; }
+    });
+    if (n && typeof SE.saveDocs === "function") SE.saveDocs();
+    return n;
+  }
+
   function finishedGoodsRows() {
     const OE = window.OverviewEngine;
     if (!OE) return [];
@@ -147,7 +162,9 @@
   }
 
   function fgRowHtml(r) {
+    const checked = state.fgSelected.has(r.d.id);
     return `<tr>
+      <td>${r.shipped ? "" : `<input type="checkbox" data-fg-select="${esc(r.d.id)}" ${checked ? "checked" : ""}>`}</td>
       <td><span class="status-tag">${esc(r.type)}</span></td>
       <td><strong>${esc(r.moNo)}</strong><small>${esc(r.d.id)}</small></td>
       <td>${esc(r.d.customer || "-")}<small>${esc(r.d.project || "-")}</small></td>
@@ -157,6 +174,17 @@
     </tr>`;
   }
 
+  // ใช้ตัวกรอง (สถานะ + คำค้นหา) ชุดเดียวกันทั้งตอนวาดตาราง และตอนคำนวณว่าปุ่ม "เลือกทั้งหมดที่แสดง" ควรเลือกอะไรบ้าง
+  // กันไม่ให้ตรรกะสองที่เพี้ยนไปคนละทาง
+  function filteredFgRows() {
+    const all = finishedGoodsRows();
+    const q = state.fgQuery.trim().toLowerCase();
+    return all
+      .filter((r) => state.fgFilter === "all" || (state.fgFilter === "instore" && !r.shipped) || (state.fgFilter === "shipped" && r.shipped))
+      .filter((r) => !q || `${r.d.id} ${r.moNo} ${r.d.customer || ""} ${r.d.project || ""}`.toLowerCase().includes(q))
+      .sort((a, b) => (b.receivedDate || "").localeCompare(a.receivedDate || ""));
+  }
+
   function finishedGoodsSectionHtml() {
     const all = finishedGoodsRows();
     const inStore = all.filter((r) => !r.shipped);
@@ -164,16 +192,26 @@
     const inStoreSqm = inStore.reduce((t, r) => t + r.sqm, 0);
     const shippedSqm = shipped.reduce((t, r) => t + r.sqm, 0);
     const receivedSqm = all.reduce((t, r) => t + r.sqm, 0);
-    const q = state.fgQuery.trim().toLowerCase();
-    const rows = all
-      .filter((r) => state.fgFilter === "all" || (state.fgFilter === "instore" && !r.shipped) || (state.fgFilter === "shipped" && r.shipped))
-      .filter((r) => !q || `${r.d.id} ${r.moNo} ${r.d.customer || ""} ${r.d.project || ""}`.toLowerCase().includes(q))
-      .sort((a, b) => (b.receivedDate || "").localeCompare(a.receivedDate || ""));
+    const rows = filteredFgRows();
+    // ยกเลิกรายการที่เลือกไว้ทิ้งถ้าตัดออกไปแล้ว (เช่น เพิ่งตัดออกหลายรายการไปเมื่อกี้) กันเลือกค้างของที่ไม่อยู่ในสถานะ "อยู่ใน Store" แล้ว
+    const stillSelectable = new Set(inStore.map((r) => r.d.id));
+    [...state.fgSelected].forEach((id) => { if (!stillSelectable.has(id)) state.fgSelected.delete(id); });
+    const visibleSelectableIds = rows.filter((r) => !r.shipped).map((r) => r.d.id);
+    const allVisibleSelected = visibleSelectableIds.length > 0 && visibleSelectableIds.every((id) => state.fgSelected.has(id));
+    const bulkBar = `<div class="pw-row store-bulk-bar" style="margin-bottom:8px;align-items:center">
+        ${visibleSelectableIds.length ? `<label class="pf tiny" style="flex-direction:row;align-items:center;gap:5px"><input type="checkbox" id="storeFgSelectAll" ${allVisibleSelected ? "checked" : ""}> เลือกทั้งหมดที่แสดง (${visibleSelectableIds.length})</label>` : ""}
+        ${state.fgSelected.size ? `
+          <span class="tag-total">เลือกแล้ว ${state.fgSelected.size} รายการ</span>
+          <label class="pf tiny">วันที่ส่งจริง<input type="date" id="storeFgBulkDate" value="${esc(state.fgBulkDate)}"></label>
+          <button type="button" class="action-button primary" data-fg-bulk-cut>ตัดออกที่เลือก (${state.fgSelected.size})</button>
+          <button type="button" class="text-button" data-fg-bulk-clear>ยกเลิกการเลือก</button>
+        ` : ""}
+      </div>`;
     return `
     <section id="storeSummary" class="summary-cards"></section>
     <section class="department-panel pw-card wide">
       <div class="panel-heading">
-        <div><strong>รับเข้า/ตัดออก สินค้าสำเร็จรูป (M/O, S/O)</strong><small>ดึงจากข้อมูลเดิมของระบบอัตโนมัติ — รับเข้า = ผ่าน QC ตกแต่งครบแล้ว, ตัดออก = ฝ่ายขายยืนยันส่งจริงแล้ว ไม่ต้องคีย์ซ้ำ</small></div>
+        <div><strong>รับเข้า/ตัดออก สินค้าสำเร็จรูป (M/O, S/O)</strong><small>ดึงจากข้อมูลเดิมของระบบอัตโนมัติ — รับเข้า = ผ่าน QC ตกแต่งครบแล้ว, ตัดออก = ฝ่ายขายยืนยันส่งจริงแล้ว หรือติ๊กเลือกหลายรายการแล้วกด "ตัดออกที่เลือก" ด้านล่าง (สำหรับ M/O,S/O เก่าที่ส่งจริงไปแล้ว ไม่ต้องไล่กดยืนยันทีละใบ) ไม่ต้องคีย์ซ้ำ</small></div>
         <label>ค้นหา<input id="storeFgSearch" placeholder="เลข M/O, S/O, ลูกค้า, Project" value="${esc(state.fgQuery)}"></label>
       </div>
       <div class="pw-body">
@@ -185,7 +223,8 @@
             <button type="button" class="view-btn ${state.fgFilter === "shipped" ? "active" : ""}" data-fg-filter="shipped">ตัดออกแล้ว (${shipped.length})</button>
           </div>
         </div>
-        ${rows.length ? `<table class="calc-table"><thead><tr><th>ประเภท</th><th>เลขที่ M/O,S/O</th><th>ลูกค้า/Project</th><th class="num">ตร.ม.</th><th>วันที่รับเข้า Store</th><th>สถานะ</th></tr></thead><tbody>${rows.map(fgRowHtml).join("")}</tbody></table>` : `<p class="col-empty">${all.length ? "ไม่พบรายการที่ตรงกับตัวกรอง" : "ยังไม่มี M/O, S/O ที่ผ่าน QC เข้า Store"}</p>`}
+        ${rows.length ? bulkBar : ""}
+        ${rows.length ? `<table class="calc-table"><thead><tr><th></th><th>ประเภท</th><th>เลขที่ M/O,S/O</th><th>ลูกค้า/Project</th><th class="num">ตร.ม.</th><th>วันที่รับเข้า Store</th><th>สถานะ</th></tr></thead><tbody>${rows.map(fgRowHtml).join("")}</tbody></table>` : `<p class="col-empty">${all.length ? "ไม่พบรายการที่ตรงกับตัวกรอง" : "ยังไม่มี M/O, S/O ที่ผ่าน QC เข้า Store"}</p>`}
       </div>
     </section>`;
   }
@@ -224,7 +263,25 @@
   function bind() {
     const root = $("#storeView");
     root.addEventListener("input", (e) => {
-      if (e.target && e.target.id === "storeFgSearch") { state.fgQuery = e.target.value; renderAll(); }
+      if (e.target && e.target.id === "storeFgSearch") { state.fgQuery = e.target.value; renderAll(); return; }
+      // ไม่ renderAll() ตอนพิมพ์/เลือกวันที่ กันโฟกัส-ตัวเลือกวันที่หลุดระหว่างพิมพ์ — อ่านค่าจริงตอนกดปุ่ม "ตัดออกที่เลือก" อีกที
+      if (e.target && e.target.id === "storeFgBulkDate") { state.fgBulkDate = e.target.value; }
+    });
+    root.addEventListener("change", (e) => {
+      const cb = e.target.closest("[data-fg-select]");
+      if (cb) {
+        const id = cb.dataset.fgSelect;
+        if (cb.checked) state.fgSelected.add(id); else state.fgSelected.delete(id);
+        renderAll();
+        return;
+      }
+      if (e.target && e.target.id === "storeFgSelectAll") {
+        const visible = filteredFgRows().filter((r) => !r.shipped);
+        if (e.target.checked) visible.forEach((r) => state.fgSelected.add(r.d.id));
+        else visible.forEach((r) => state.fgSelected.delete(r.d.id));
+        renderAll();
+        return;
+      }
     });
     root.addEventListener("click", (e) => {
       const filterBtn = e.target.closest("[data-fg-filter]");
@@ -237,6 +294,21 @@
         renderAll();
         return;
       }
+      const bulkCutBtn = e.target.closest("[data-fg-bulk-cut]");
+      if (bulkCutBtn) {
+        const ids = [...state.fgSelected];
+        if (!ids.length) return;
+        const dateInput = $("#storeFgBulkDate");
+        const date = (dateInput && dateInput.value) || state.fgBulkDate || todayIso();
+        if (!confirm(`ตัดออก ${ids.length} รายการที่เลือก โดยบันทึกวันที่ส่งจริง = ${date}? (แก้ไขทีหลังได้ที่หน้ารายงานขาย)`)) return;
+        const n = bulkMarkShipped(ids, date);
+        state.fgSelected.clear();
+        toast(`ตัดออกแล้ว ${n} รายการ`);
+        renderAll();
+        return;
+      }
+      const bulkClearBtn = e.target.closest("[data-fg-bulk-clear]");
+      if (bulkClearBtn) { state.fgSelected.clear(); renderAll(); return; }
     });
     root.addEventListener("submit", (e) => {
       if (e.target && e.target.id === "storeLedgerForm") {
