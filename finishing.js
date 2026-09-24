@@ -23,6 +23,19 @@
 
   const PE = () => window.PlanningEngine;
   const WF = () => window.WeaveFloorEngine;
+  const CE = () => window.CostEngine;
+
+  // ต้นทุนออกแบบ (แผนก Design) ต่อ designId เดียวกับที่ใช้ทั่วทั้งระบบ (= id ของแถวใน designs[])
+  // ไม่คิดต้นทุนถ้าเป็นแถว M/O ที่นำเข้าอัตโนมัติจาก QC Check Sheet (job==="OPENED") ที่ยังไม่เคยผูกกับงานทำแบบจริง
+  function designCostFor(designId) {
+    try {
+      const ce = CE();
+      if (!ce || typeof ce.designCostIndex !== "function") return null;
+      const it = ce.designCostIndex().get(designId);
+      if (!it || !it.row || it.row.job === "OPENED") return null;
+      return { cost: it.cost, costN: it.costN, costO: it.costO, designer: it.designer, hours: it.h };
+    } catch (e) { return null; }
+  }
 
   const KEY_FINISH = "siam-finishing"; // { [designId]: { pieces:{[lineIdx]:FinishRec} } }
 
@@ -353,10 +366,12 @@
       (rec.extraCosts || []).forEach((ec) => { extraCostTotal += num(ec.amount); extraLines.push(ec); });
     });
     const isDomestic = doc && doc.market === "DOMESTIC";
-    const total = dyeCost + labor.total + meshCost + glueCost + (isDomestic ? transportCost + extraStaffCost : 0) + extraCostTotal;
+    const dcost = designCostFor(designId);
+    const designCost = dcost ? dcost.cost : 0;
+    const total = designCost + dyeCost + labor.total + meshCost + glueCost + (isDomestic ? transportCost + extraStaffCost : 0) + extraCostTotal;
     const sqm = num(plan.totalAreaSqm);
     return {
-      designId, plan, doc, dyeCost, dyeMissing, labor, meshCost, glueCost,
+      designId, plan, doc, designCost, designer: dcost ? dcost.designer : "", dyeCost, dyeMissing, labor, meshCost, glueCost,
       transportCost: isDomestic ? transportCost : 0, extraStaffCost: isDomestic ? extraStaffCost : 0,
       extraCostTotal, extraLines, total, sqm, costPerSqm: sqm > 0 ? total / sqm : 0,
       isDomestic, market: doc ? doc.market : null,
@@ -368,6 +383,7 @@
     return `<tr>
       <td>${esc(c.plan.moNo || c.designId)}</td>
       <td>${c.market ? esc(c.market === "DOMESTIC" ? "ในประเทศ" : "ต่างประเทศ") : "-"}</td>
+      <td class="num">${c.designCost ? fmt(c.designCost, 2) : `<span class="muted">-</span>`}${c.designer ? `<br><small>${esc(c.designer)}</small>` : ""}</td>
       <td class="num">${fmt(c.dyeCost, 2)}${c.dyeMissing ? `<br><small class="pw-dye-warn">${c.dyeMissing} หม้อยังไม่มีใบสั่งย้อม</small>` : ""}</td>
       <td class="num">${fmt(c.labor.total, 2)}</td>
       <td class="num">${fmt(c.meshCost + c.glueCost, 2)}</td>
@@ -379,18 +395,27 @@
     </tr>`;
   }
 
-  function costTabHtml() {
+  // รายชื่อ designId ทั้งหมดที่ควรมีในสรุปต้นทุนต่อ M/O (มีจอทอ/ทากาวแล้ว หรือมีใบวางแผนงานที่บันทึกไว้)
+  function allCostRollups() {
     const ids = [...new Set([...readyDesignIds(), ...Object.keys(loadFinishAll())])];
     const plans = PE().readJson(PE().KEY_PLANS, {});
     const allSaved = Object.keys(plans).filter((id) => plans[id].savedAt);
-    const list = [...new Set([...ids, ...allSaved])].map((id) => costRollupFor(id)).filter(Boolean);
+    return [...new Set([...ids, ...allSaved])].map((id) => costRollupFor(id)).filter(Boolean);
+  }
+
+  // ตารางสรุปต้นทุนต่อ M/O แบบละเอียดทุกแผนก (Design + ย้อม + ทอ/แต่ง + ผ้าตาข่าย/กาว + ขนส่ง + อื่น ๆ)
+  // เรียกใช้ได้ทั้งจากแท็บนี้เอง และจากหน้า “ต้นทุน M/O” ส่วนกลาง (cost.js)
+  function costRollupTableHtml() {
+    const list = allCostRollups();
+    return list.length ? `<table class="calc-table"><thead><tr><th>M/O</th><th>ตลาด</th><th class="num">ต้นทุนออกแบบ</th><th class="num">ค่าไหม/ย้อม</th><th class="num">ค่าแรงทอ+แต่ง</th><th class="num">ค่าผ้าตาข่าย+กาว</th><th class="num">ขนส่ง+พนักงานเพิ่ม</th><th class="num">อื่น ๆ</th><th class="num">รวมต้นทุน</th><th class="num">ต้นทุน/ตร.ม.</th><th class="num">ยอดขาย</th></tr></thead><tbody>${list.map(costRollupRowHtml).join("")}</tbody></table>
+    <p style="color:var(--muted);font-size:10px;margin:6px 2px 0">หมายเหตุ: ต้นทุนออกแบบคำนวณจากหน้า “ต้นทุน M/O” (เงินเดือน Designer ÷ ชั่วโมงทำงาน) เฉพาะ M/O ที่ผูกกับงานทำแบบจริงในทะเบียน Design เท่านั้น · ค่าแรงทอ+แต่งใช้สูตรเดียวกับหน้าใบวางแผนงาน (พื้นที่ × ค่าแรงเกรด + พื้นที่ × 400 บาท/ตร.ม. สำหรับแต่ง/ทากาว — สมมติฐานหน่วย ยังไม่ยืนยันกับฝ่ายบัญชี) · ค่าแรงแผนกเจาะลาย/ขยายลาย ยังไม่มีอัตราค่าจ้างยืนยัน จึงไม่รวมในยอดนี้ · ยอดขายเทียบสกุลเงินตามที่บันทึกในหน้ารายงานขาย (ต่างประเทศเป็น USD ในประเทศเป็น THB — ไม่ได้แปลงอัตราแลกเปลี่ยนให้)</p>` : `<p class="col-empty">ยังไม่มี M/O ที่บันทึกใบวางแผนงาน</p>`;
+  }
+
+  function costTabHtml() {
     return `
     <section class="department-panel pw-card wide">
-      <div class="panel-heading"><div><strong>สรุปต้นทุนต่อ M/O</strong><small>รวมค่าไหม/ย้อม (จากใบสั่งย้อมในใบวางแผนงาน) + ค่าแรงทอ+แต่ง (สูตรประมาณของ Planning) + ค่าผ้าตาข่าย/กาว + ค่าขนส่ง/พนักงานเพิ่ม (เฉพาะขายในประเทศ) + รายการอื่น ๆ — ตัวเลขราคาที่ยังไม่มีข้อมูลจริงเริ่มต้นที่ 0 ทั้งหมด กรอกเพิ่มได้ตามจริง</small></div></div>
-      <div class="pw-body">
-        ${list.length ? `<table class="calc-table"><thead><tr><th>M/O</th><th>ตลาด</th><th class="num">ค่าไหม/ย้อม</th><th class="num">ค่าแรงทอ+แต่ง</th><th class="num">ค่าผ้าตาข่าย+กาว</th><th class="num">ขนส่ง+พนักงานเพิ่ม</th><th class="num">อื่น ๆ</th><th class="num">รวมต้นทุน</th><th class="num">ต้นทุน/ตร.ม.</th><th class="num">ยอดขาย</th></tr></thead><tbody>${list.map(costRollupRowHtml).join("")}</tbody></table>
-        <p style="color:var(--muted);font-size:10px;margin:6px 2px 0">หมายเหตุ: ค่าแรงทอ+แต่งใช้สูตรเดียวกับหน้าใบวางแผนงาน (พื้นที่ × ค่าแรงเกรด + พื้นที่ × 400 บาท/ตร.ม. สำหรับแต่ง/ทากาว — สมมติฐานหน่วย ยังไม่ยืนยันกับฝ่ายบัญชี) · ค่าแรงแผนกเจาะลาย/ขยายลาย ยังไม่มีอัตราค่าจ้างยืนยัน จึงไม่รวมในยอดนี้ · ยอดขายเทียบสกุลเงินตามที่บันทึกในหน้ารายงานขาย (ต่างประเทศเป็น USD ในประเทศเป็น THB — ไม่ได้แปลงอัตราแลกเปลี่ยนให้)</p>` : `<p class="col-empty">ยังไม่มี M/O ที่บันทึกใบวางแผนงาน</p>`}
-      </div>
+      <div class="panel-heading"><div><strong>สรุปต้นทุนต่อ M/O</strong><small>รวมต้นทุนออกแบบ + ค่าไหม/ย้อม (จากใบสั่งย้อมในใบวางแผนงาน) + ค่าแรงทอ+แต่ง (สูตรประมาณของ Planning) + ค่าผ้าตาข่าย/กาว + ค่าขนส่ง/พนักงานเพิ่ม (เฉพาะขายในประเทศ) + รายการอื่น ๆ — ตัวเลขราคาที่ยังไม่มีข้อมูลจริงเริ่มต้นที่ 0 ทั้งหมด กรอกเพิ่มได้ตามจริง · ดูสรุปรวมทุก M/O ได้ที่แท็บ “ต้นทุน M/O”</small></div></div>
+      <div class="pw-body">${costRollupTableHtml()}</div>
     </section>
 
     ${currentRef() ? costDetailHtml() : `<p class="col-empty">เลือกชิ้นในแท็บ “รับพรม + ทากาว” เพื่อกรอกค่าขนส่ง/ค่าใช้จ่ายเพิ่มเติมของ M/O นั้น</p>`}`;
@@ -637,6 +662,6 @@
     });
   }
 
-  window.FinishingEngine = { KEY_FINISH, loadFinishAll, ensureDesignFinish, saveDesignFinish, ensurePieceFinish, areaBeforeGlue, standardGlueKg, actualGlueKg, glueVariancePct, costRollupFor, readyFinishPieces };
+  window.FinishingEngine = { KEY_FINISH, loadFinishAll, ensureDesignFinish, saveDesignFinish, ensurePieceFinish, areaBeforeGlue, standardGlueKg, actualGlueKg, glueVariancePct, costRollupFor, allCostRollups, costRollupTableHtml, readyFinishPieces };
   window.renderFinishing = renderFinishing;
 })();

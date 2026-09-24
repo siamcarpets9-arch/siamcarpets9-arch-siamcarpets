@@ -22,7 +22,6 @@
     <nav>
       <button class="nav-link active" data-view="overview">ภาพรวมการผลิต</button>
       <button class="nav-link" data-view="design">Design</button>
-      <button class="nav-link" data-view="cost">ต้นทุน Design</button>
       <button class="nav-link" data-view="sales">Sales</button>
       <button class="nav-link" data-view="salesreport">รายงานขาย</button>
       <button class="nav-link" data-view="shipping">ใบส่ง/Marks&amp;Nos</button>
@@ -38,6 +37,7 @@
       <button class="nav-link">Store</button>
       <button class="nav-link" data-view="kpi">KPI</button>
       <button class="nav-link gold">ตั้งค่า</button>
+      <button class="nav-link" data-view="cost">ต้นทุน M/O</button>
       <a class="nav-link qc-external-link" href="qc-dashboard/index.html" target="_blank" rel="noopener" title="ระบบวางแผน/QC เดิม (Google Sheets + Apps Script) — เปิดแยกอีกแท็บ">แผน+QC (ระบบเดิม) ↗</a>
     </nav>
   </header>
@@ -106,15 +106,24 @@
     <section id="costView" class="app-view">
       <section class="page-heading">
         <div>
-          <p class="eyebrow">DESIGN COST</p>
-          <h1>ต้นทุนแผนก Design ต่อ Project</h1>
-          <p class="subtitle">คำนวณจากจำนวนแบบ เวลาทำงานปกติ โอที และการออกวัดพื้นที่ พร้อมระบุ Sale ผู้ดำเนินการ</p>
+          <p class="eyebrow">COST</p>
+          <h1>ต้นทุนรวมต่อ M/O</h1>
+          <p class="subtitle">สรุปต้นทุนแยกตาม M/O โดยละเอียดทุกแผนก (ออกแบบ + ย้อม + ทอ/แต่ง + ผ้าตาข่าย/กาว + ขนส่ง) — ต้นทุนออกแบบคำนวณจากจำนวนแบบ เวลาทำงานปกติ/โอที และการออกวัดพื้นที่ ตั้งค่าและดูรายละเอียดได้ด้านล่าง</p>
         </div>
         <div class="heading-actions cost-actions">
-          <label>ช่วงเวลา<select id="costPeriod"><option value="all">ทุกช่วงเวลา</option></select></label>
+          <label>ช่วงเวลา (ต้นทุนออกแบบ)<select id="costPeriod"><option value="all">ทุกช่วงเวลา</option></select></label>
           <button data-act="toggle-settings">ตั้งค่าอัตราและ Sale</button>
           <button class="primary-action" data-act="new-trip">+ บันทึกทริปวัดพื้นที่</button>
         </div>
+      </section>
+
+      <section class="department-panel pw-card wide">
+        <div class="panel-heading"><div><strong>สรุปต้นทุนต่อ M/O (ทุกแผนก)</strong><small>รวมทุกแผนกต่อ M/O เดียว — ต้นทุนออกแบบมาจากตารางด้านล่างของหน้านี้</small></div></div>
+        <div class="pw-body" id="costMoRollup"></div>
+      </section>
+
+      <section class="page-heading" style="margin-top:22px">
+        <div><p class="eyebrow">DESIGN COST DETAIL</p><h2 style="margin:2px 0 0;font-size:16px">รายละเอียดต้นทุนออกแบบ (แยกตาม Project / Designer)</h2></div>
       </section>
 
       <div id="costNotices"></div>

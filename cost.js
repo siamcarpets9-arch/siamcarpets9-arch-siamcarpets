@@ -720,6 +720,16 @@
     renderSaleTable();
     renderDesignerTable();
     renderTripTable();
+    renderMoRollup();
+  }
+  function renderMoRollup() {
+    const el = $c("#costMoRollup");
+    if (!el) return;
+    try {
+      el.innerHTML = (typeof FinishingEngine !== "undefined" && FinishingEngine.costRollupTableHtml)
+        ? FinishingEngine.costRollupTableHtml()
+        : `<p class="col-empty">ยังไม่พร้อมใช้งาน</p>`;
+    } catch (e) { el.innerHTML = `<p class="col-empty">ยังไม่พร้อมใช้งาน</p>`; }
   }
   function renderCost() {
     if (!root()) return;
@@ -859,5 +869,6 @@
     const key = projectKey(customer, project);
     return (has(S.projectSale, key) && S.projectSale[key]) || (has(S.customerSale, customer.toUpperCase()) && S.customerSale[customer.toUpperCase()]) || "";
   };
-  window.CostEngine = { compute, splitTrip, evalTrip, resolveDate, resolveDates, workType, isRevision, makeCtx, DEFAULTS, getState: () => ({ S, trips, overrides, model }) };
+  // ดัชนีต้นทุนออกแบบต่อแบบ (คีย์ = id ของแถวใน designs[] ซึ่งเป็นคีย์เดียวกับ designId ที่ใช้ทั่วระบบ) คำนวณสดทุกครั้งจากอัตรา/ค่าตั้งค่าปัจจุบัน ไม่ผูกกับช่วงเวลาที่เลือกในหน้านี้ (ใช้ทั้งอายุของแบบ)
+  window.CostEngine = { compute, splitTrip, evalTrip, resolveDate, resolveDates, workType, isRevision, makeCtx, DEFAULTS, getState: () => ({ S, trips, overrides, model }), designCostIndex: () => compute(designs, trips, S, overrides, null).itemsById };
 })();

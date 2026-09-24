@@ -246,6 +246,45 @@
     return [...set].sort();
   }
 
+  /* ---------------- เงินเดือนพนักงานทอ (คงที่ต่อคน/เดือน แบบเดียวกับนักออกแบบ) ---------------- */
+  const KEY_WEAVE_SALARY = "siam-weave-worker-salary"; // { [ชื่อพนักงานทอ]: เงินเดือนต่อเดือน (บาท) }
+  function loadWeaveSalaries() { return readJson(KEY_WEAVE_SALARY, {}); }
+  function saveWeaveSalaries(all) { writeJson(KEY_WEAVE_SALARY, all); }
+  function setWeaveSalary(name, amount) {
+    if (!has(name)) return;
+    const all = loadWeaveSalaries();
+    if (num(amount) > 0) all[name] = num(amount); else delete all[name];
+    saveWeaveSalaries(all);
+  }
+
+  // สรุปผลงานพนักงานทอตามช่วงเวลาที่เลือก (วัน/เดือน/ปี — กำหนดด้วย datePredicate รับ iso คืน true/false)
+  // ตร.ม.ของแต่ละกะแบ่งเฉลี่ยเท่า ๆ กันตามจำนวนคนที่เข้ากะนั้น (ทำงานเป็นทีมต่อจอ แยกผลงานรายคนจริงไม่ได้) · ชั่วโมงนับเต็มชั่วโมงกะต่อคนที่เข้ากะ
+  function workerPeriodSummary(datePredicate) {
+    const byWorker = new Map();
+    const get = (name) => {
+      let w = byWorker.get(name);
+      if (!w) { w = { name, sqm: 0, hours: 0, days: new Set() }; byWorker.set(name, w); }
+      return w;
+    };
+    allPieceRefs().forEach((r) => {
+      Object.keys(r.piece.days || {}).forEach((iso) => {
+        if (!datePredicate(iso)) return;
+        const day = r.piece.days[iso];
+        ["normal", "ot"].forEach((shiftName) => {
+          const shift = day[shiftName];
+          const workers = shift.workers || [];
+          if (!workers.length) return;
+          const hrs = shiftHours(shift), sqmPer = num(shift.doneSqm) / workers.length;
+          workers.forEach((w) => { const rec = get(w); rec.sqm += sqmPer; rec.hours += hrs; rec.days.add(iso); });
+        });
+      });
+    });
+    const salaries = loadWeaveSalaries();
+    return [...byWorker.values()]
+      .map((w) => ({ name: w.name, sqm: w.sqm, hours: w.hours, days: w.days.size, eff: w.hours > 0 ? w.sqm / w.hours : 0, salary: num(salaries[w.name]) }))
+      .sort((a, b) => b.sqm - a.sqm);
+  }
+
   // ดึงรูปแบบพรม (patternImage) ที่แนบไว้ในหน้าแผนกทอสำหรับ M/O,S/O นี้ — ใช้แสดงรูปดีไซน์ในหน้าภาพรวม/ใบส่งของ
   // (ยังไม่มีช่องเก็บรูปต่อดีไซน์โดยตรงในระบบ จึงดึงจากรูปที่ช่างทอแนบไว้ต่อชิ้น/ล็อกการทอแทน — คืนรูปแรกที่พบ)
   function getDesignImage(designId) {
@@ -265,13 +304,14 @@
     loadYarnRequests, saveYarnRequests, addYarnRequest, updateYarnRequest, pendingYarnRequests,
     loadQc, saveQc, addQc, loadNotify, saveNotify, logNotify,
     planFor, dyePlanOf, moDocOf, issueRecOf, loadWeaveWorkers, linesOf, suggestedGradeFor,
-    readyDesigns, allPieceRefs, daySummary, allLoggedDates, readJson, writeJson, getDesignImage
+    readyDesigns, allPieceRefs, daySummary, allLoggedDates, readJson, writeJson, getDesignImage,
+    KEY_WEAVE_SALARY, loadWeaveSalaries, saveWeaveSalaries, setWeaveSalary, workerPeriodSummary
   };
 
   /* ============================================================
      UI — แผนกทอ (จอทอรายวัน)
      ============================================================ */
-  const state = { tab: "setup", designId: null, lineIdx: null, day: todayIso() };
+  const state = { tab: "setup", designId: null, lineIdx: null, day: todayIso(), workerMode: "day", workerDay: todayIso(), workerMonth: todayIso().slice(0, 7), workerYear: todayIso().slice(0, 4) };
 
   function field(label, inner) { return `<label class="pf">${label}${inner}</label>`; }
   function res(label, value, cls = "") { return `<div class="pr ${cls}"><small>${label}</small><strong>${value}</strong></div>`; }
@@ -479,7 +519,10 @@
     const byLoom = [...refs].sort((a, b) => String(a.piece.loomNo || "999").localeCompare(String(b.piece.loomNo || "999"), "th", { numeric: true }));
     const grades = PE().WEAVE_GRADES || [];
     const designsList = typeof designs !== "undefined" ? designs : [];
-    return `<div class="wfb-grid">${byLoom.map((r) => {
+    const todayKey = todayIso();
+    const activeToday = byLoom.filter((r) => { const d = r.piece.days[todayKey]; return d && (num(d.normal.doneSqm) > 0 || num(d.ot.doneSqm) > 0); }).length;
+    return `<p class="col-empty" style="text-align:left;padding:0 2px 10px">ภาพรวมจอทอวันนี้ (${thaiDate(todayKey)}) — ทำงานแล้ว ${activeToday} จาก ${byLoom.length} จอ</p>
+    <div class="wfb-grid">${byLoom.map((r) => {
       const design = designsList.find((d) => d.id === r.designId) || {};
       const type = typeOfDesign(r.designId);
       const market = design.market === "DOMESTIC" ? "ในประเทศ" : design.market === "FOREIGN" ? "ต่างประเทศ" : "-";
@@ -488,6 +531,8 @@
       const lastIso = dates[dates.length - 1];
       const done = pieceDoneTotal(r.piece), remain = Math.max(0, r.totalArea - done);
       const donePct = r.totalArea > 0 ? Math.min(100, (done / r.totalArea) * 100) : 0;
+      const todayRec = r.piece.days[todayKey];
+      const todaySqm = todayRec ? num(todayRec.normal.doneSqm) + num(todayRec.ot.doneSqm) : 0;
 
       let totalMh = 0;
       const allWeavers = new Set();
@@ -529,6 +574,10 @@
           <div class="wfb-stat"><small>ทอไปแล้ว</small><strong>${fmt(done, 2)}</strong></div>
           <div class="wfb-stat${remain <= 0.0005 ? " main" : ""}"><small>คงเหลือ</small><strong>${fmt(remain, 2)}</strong></div>
         </div>
+        <div class="wfb-stats">
+          <div class="wfb-stat${todaySqm > 0 ? " main" : ""}"><small>ทำได้วันนี้</small><strong>${fmt(todaySqm, 2)}</strong></div>
+          <div class="wfb-stat"><small>ยกไปวันถัดไป</small><strong>${fmt(remain, 2)}</strong></div>
+        </div>
         <div class="wfb-foot"><small>บันทึกล่าสุด ${lastIso ? thaiDate(lastIso) : "ยังไม่บันทึก"}</small></div>
         <div class="pw-save-bar">
           <button type="button" class="action-button primary" data-transfer-glue="${esc(r.designId)}" data-transfer-line="${esc(r.lineIdx)}" ${remain > 0.0005 ? "disabled" : ""}>โอนให้แผนกทากาวตกแต่ง</button>
@@ -555,6 +604,38 @@
     </tr>`;
   }
 
+  // สรุปพนักงานทอตามช่วงเวลา — เรียกดูรายวัน/รายเดือน/รายปีได้ + ตั้งเงินเดือนคงที่ต่อคน/เดือนได้ในตารางเดียวกัน
+  function workerReportHtml() {
+    const mode = state.workerMode || "day";
+    let predicate, label;
+    if (mode === "month") { predicate = (iso) => iso.slice(0, 7) === state.workerMonth; label = state.workerMonth; }
+    else if (mode === "year") { predicate = (iso) => iso.slice(0, 4) === String(state.workerYear); label = state.workerYear; }
+    else { predicate = (iso) => iso === state.workerDay; label = thaiDate(state.workerDay); }
+    const rows = workerPeriodSummary(predicate);
+    return `<section class="department-panel pw-card wide">
+      <div class="panel-heading">
+        <div><strong>สรุปพนักงานทอตามช่วงเวลา</strong><small>ตร.ม. แบ่งเฉลี่ยตามจำนวนคนที่เข้ากะ (ทอเป็นทีมต่อจอ แยกผลงานรายคนจริงไม่ได้) · ตั้งเงินเดือนคงที่ต่อคน/เดือนได้ในตารางนี้</small></div>
+        <div class="pw-row">
+          <select data-wf-worker-mode>
+            <option value="day" ${mode === "day" ? "selected" : ""}>รายวัน</option>
+            <option value="month" ${mode === "month" ? "selected" : ""}>รายเดือน</option>
+            <option value="year" ${mode === "year" ? "selected" : ""}>รายปี</option>
+          </select>
+          ${mode === "day" ? `<input type="date" data-wf-worker-day value="${esc(state.workerDay)}">` : ""}
+          ${mode === "month" ? `<input type="month" data-wf-worker-month value="${esc(state.workerMonth)}">` : ""}
+          ${mode === "year" ? `<input type="number" min="2020" max="2100" step="1" class="pw-num tiny" data-wf-worker-year value="${esc(state.workerYear)}">` : ""}
+        </div>
+      </div>
+      <div class="pw-body">
+        ${rows.length ? `<table class="calc-table"><thead><tr><th>พนักงานทอ</th><th class="num">ตร.ม.</th><th class="num">ชั่วโมง</th><th class="num">ประสิทธิภาพ (ตร.ม./ชม.)</th><th class="num">จำนวนวันที่ทำงาน</th><th class="num">เงินเดือน (บาท/เดือน)</th></tr></thead><tbody>
+          ${rows.map((w) => `<tr><td>${esc(w.name)}</td><td class="num">${fmt(w.sqm, 2)}</td><td class="num">${fmt(w.hours, 1)}</td><td class="num">${fmt(w.eff, 3)}</td><td class="num">${w.days}</td><td class="num"><input class="pw-num tiny" data-weaver-salary="${esc(w.name)}" inputmode="decimal" placeholder="เช่น 12000" value="${w.salary ? esc(w.salary) : ""}"></td></tr>`).join("")}
+        </tbody></table>` : `<p class="col-empty">ไม่มีข้อมูลการทอในช่วงเวลาที่เลือก (${esc(label)})</p>`}
+      </div>
+    </section>
+
+    `;
+  }
+
   function reportTabHtml() {
     const sum = daySummary(state.day);
     const notify = loadNotify().slice().reverse().slice(0, 10);
@@ -570,6 +651,8 @@
         ${gradeSummaryTableHtml(sum)}
       </div>
     </section>
+
+    ${workerReportHtml()}
 
     <section class="department-panel pw-card wide">
       <div class="panel-heading"><div><strong>คำขอไหมเพิ่ม (ส่งแผนกวางแผนออกใบสั่งย้อม)</strong><small>เมื่อสีใดไหมไม่พอ กดปุ่ม “ขอไหมเพิ่ม” ในแท็บตั้งค่าขึ้นทอ — รายการจะมาแสดงที่นี่และในหน้า Planning</small></div></div>
@@ -978,6 +1061,12 @@
         renderAll(); return;
       }
       if (e.target.id === "wfDayPicker" || e.target.id === "repDayPicker") { state.day = e.target.value; renderAll(); return; }
+      if (e.target.matches("[data-wf-worker-mode]")) { state.workerMode = e.target.value; renderAll(); return; }
+      if (e.target.matches("[data-wf-worker-day]")) { state.workerDay = e.target.value; renderAll(); return; }
+      if (e.target.matches("[data-wf-worker-month]")) { state.workerMonth = e.target.value; renderAll(); return; }
+      if (e.target.matches("[data-wf-worker-year]")) { state.workerYear = e.target.value; renderAll(); return; }
+      const salaryInput = e.target.closest("[data-weaver-salary]");
+      if (salaryInput) { setWeaveSalary(salaryInput.dataset.weaverSalary, salaryInput.value); renderAll(); return; }
     });
 
     root.addEventListener("input", (e) => {
