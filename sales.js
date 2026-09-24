@@ -754,7 +754,7 @@
   async function onFile(e) {
     const f = e.target.files[0];
     if (!f) return;
-    if (typeof XLSX === "undefined") { importStatus("โหลดตัวอ่าน Excel (SheetJS) ไม่ได้ — ต้องเชื่อมต่ออินเทอร์เน็ตเพื่อโหลดไลบรารี"); return; }
+    if (typeof XLSX === "undefined") { importStatus("โหลดตัวอ่าน Excel (SheetJS) ไม่สำเร็จ — ลองรีเฟรชหน้าเว็บอีกครั้ง"); return; }
     try {
       ui.wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
       const names = ui.wb.SheetNames;
@@ -784,7 +784,7 @@
     refresh(); toast(`นำเข้ารายงาน${MARKETS[market].label} ${fresh.length} M/O แล้ว`);
   }
   function exportXlsx() {
-    if (typeof XLSX === "undefined") { toast("โหลดตัวอ่าน Excel ไม่ได้ — ต้องเชื่อมต่ออินเทอร์เน็ต"); return; }
+    if (typeof XLSX === "undefined") { toast("โหลดตัวอ่าน Excel ไม่สำเร็จ — ลองรีเฟรชหน้าเว็บอีกครั้ง"); return; }
     const mk = MARKETS[ui.market], cur = mk.currency, kp = computeKpi(docs, ui.market, { year: ui.year, month: ui.month, day: 0 });
     const r2 = (n) => Math.round(n * 100) / 100;
     const mHead = ["เดือน", "M/O เปิด", "รับเข้า (ตร.ม.)", `ยอดขาย (${cur})`, "ส่งออก (ตร.ม.)", `มูลค่าส่งออก (${cur})`, "SO Approved", "SO ทั้งหมด"];

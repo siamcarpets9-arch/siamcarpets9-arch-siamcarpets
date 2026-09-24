@@ -1,6 +1,9 @@
 /* โค้ดสไตล์เฉพาะ ใบวางแผนงาน (Planning Worksheet) — ใช้ตัวแปรสี/คลาสร่วมกับ styles.css, calc.css */
-#planworkView .col-empty,#patternView .col-empty,#dyeingView .col-empty{padding:16px;text-align:center;color:var(--muted);font-size:11px}
-#dyeingView table.calc-table{min-width:0}
+#planworkView .col-empty,#patternView .col-empty,#dyeingView .col-empty,#storeView .col-empty{padding:16px;text-align:center;color:var(--muted);font-size:11px}
+#dyeingView table.calc-table,#storeView table.calc-table{min-width:0}
+.store-ledger-form{align-items:flex-end}
+.store-ledger-form select{padding:7px 8px;border:1px solid var(--line);font:inherit;font-size:11px;background:#fff;color:var(--ink);min-width:110px}
+.store-balance-neg{color:var(--red);font-weight:900}
 .pw-card{margin-bottom:10px}
 .pw-card.wide{grid-column:1/-1}
 .pw-card .panel-heading{align-items:flex-start}

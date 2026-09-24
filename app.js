@@ -1040,7 +1040,7 @@ function inPeriod(dateValue, range){
 function setView(view){
   $$(".app-view").forEach((section)=>section.classList.toggle("active-view",section.id===`${view}View`||(view==="overview"&&section.id==="planningView"))); // หน้า Planning (Master Plan Gantt) เดิม ถูกย้ายมารวมแสดงต่อท้ายหน้า "ภาพรวมการผลิต" แล้ว ไม่มีแท็บแยกอีกต่อไป
   $$(".nav-link[data-view]").forEach((button)=>button.classList.toggle("active",button.dataset.view===view));
-  const flowView=({cost:"design",salesreport:"sales",shipping:"sales",calc:"design",colors:"design",planwork:"planning",dyeing:"planning",pattern:"planning",weaveissue:"planning",weavefloor:"planning",finishing:"planning",qcdash:"planning"})[view]||view; // หน้าต้นทุนอยู่ในขั้น Design · รายงานขาย/ใบส่งอยู่ในขั้น Sales · ใบวางแผนงาน/แผนกย้อม/เจาะลาย/ส่งแผนกทอ/แผนกทอ/ทากาวตกแต่ง/QC อยู่ในขั้น Planning
+  const flowView=({cost:"design",salesreport:"sales",shipping:"sales",calc:"design",colors:"design",planwork:"planning",dyeing:"planning",pattern:"planning",weaveissue:"planning",weavefloor:"planning",finishing:"planning",qcdash:"planning",store:"planning"})[view]||view; // หน้าต้นทุนอยู่ในขั้น Design · รายงานขาย/ใบส่งอยู่ในขั้น Sales · ใบวางแผนงาน/แผนกย้อม/เจาะลาย/ส่งแผนกทอ/แผนกทอ/ทากาวตกแต่ง/QC/สโตร์ อยู่ในขั้น Planning
   $$(".workflow-step").forEach((step)=>{
     const order={design:1,sales:2,planning:3};
     step.classList.toggle("active",step.dataset.workflow===flowView);
@@ -1063,6 +1063,7 @@ function setView(view){
   if(view==="weavefloor"&&typeof renderWeaveFloor==="function") renderWeaveFloor();
   if(view==="finishing"&&typeof renderFinishing==="function") renderFinishing();
   if(view==="qcdash"&&typeof renderQcDashboard==="function") renderQcDashboard();
+  if(view==="store"&&typeof renderStore==="function") renderStore();
   if(view==="kpi"&&typeof renderKpi==="function") renderKpi();
 }
 
@@ -1342,7 +1343,7 @@ $("#designForm").addEventListener("submit",(event)=>{
 });
 $("#designFile").addEventListener("change",async(event)=>{
   const file=event.target.files[0]; if(!file) return;
-  if(!window.XLSX){$("#importStatus").textContent="ไม่พบตัวอ่าน Excel กรุณาเปิดหน้าเว็บขณะเชื่อมต่ออินเทอร์เน็ต";return;}
+  if(!window.XLSX){$("#importStatus").textContent="โหลดตัวอ่าน Excel ไม่สำเร็จ — ลองรีเฟรชหน้าเว็บอีกครั้ง";return;}
   // อ่านวันที่เป็นเลข serial แล้วแปลงเอง เพื่อไม่ให้วันที่เลื่อน 1 วันตามเขตเวลา (cellDates ใน UTC+7 ทำให้ 9 ม.ค. กลายเป็น 8 ม.ค.)
   const buffer=await file.arrayBuffer(); const workbook=XLSX.read(buffer,{type:"array"});
   const picker=$("#sheetPicker"); picker.innerHTML=`<option value="__ALL__">ทุกชีต (${workbook.SheetNames.length})</option>`+workbook.SheetNames.map(name=>`<option value="${name}">${name}</option>`).join(""); picker.disabled=false; $("#importDesignButton").disabled=false;

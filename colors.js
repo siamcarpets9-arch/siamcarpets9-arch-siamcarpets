@@ -226,7 +226,7 @@
     return "﻿" + ["code,series,name,hex,tone,year,note", ...codes.map((c) => [c.code, c.series, c.name, c.hex, c.tone, c.year, c.note].map(q).join(","))].join("\r\n");
   }
   async function importFile(f) {
-    if (typeof XLSX === "undefined") { toast("โหลดตัวอ่าน Excel ไม่ได้ — ต้องเชื่อมต่ออินเทอร์เน็ต"); return; }
+    if (typeof XLSX === "undefined") { toast("โหลดตัวอ่าน Excel ไม่สำเร็จ — ลองรีเฟรชหน้าเว็บอีกครั้ง"); return; }
     const wb = XLSX.read(await f.arrayBuffer(), { type: "array" }), aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
     let h = aoa.findIndex((r) => r.some((c) => /^(code|โค้ด|รหัส)/i.test(txt(c))));
     if (h < 0) { toast("ไม่พบหัวคอลัมน์ code/โค้ด ในแถวแรก ๆ ของไฟล์"); return; }

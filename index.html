@@ -34,7 +34,7 @@
       <button class="nav-link" data-view="weavefloor">แผนกทอ (จอทอรายวัน)</button>
       <button class="nav-link" data-view="finishing">ทากาวตกแต่ง</button>
       <button class="nav-link" data-view="qcdash">QC Dashboard</button>
-      <button class="nav-link">Store</button>
+      <button class="nav-link" data-view="store">แผนกสโตร์</button>
       <button class="nav-link" data-view="kpi">KPI</button>
       <button class="nav-link gold">ตั้งค่า</button>
       <button class="nav-link" data-view="cost">ต้นทุน M/O</button>
@@ -371,9 +371,13 @@
     <section id="weavefloorView" class="app-view"></section>
     <section id="finishingView" class="app-view"></section>
     <section id="qcdashView" class="app-view"></section>
+    <section id="storeView" class="app-view"></section>
     <section id="kpiView" class="app-view"></section>
   </main>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <!-- แนบไฟล์ตัวอ่าน Excel (SheetJS) ไว้ในเครื่องแล้ว ไม่ต้องต่ออินเทอร์เน็ตตอนใช้งาน — เดิมโหลดจาก
+       cdn.sheetjs.com ทำให้ "นำเข้า Excel" ทุกหน้าในระบบใช้งานไม่ได้เลยถ้าเครื่องที่เปิดแอปนี้ไม่มี/
+       เข้าอินเทอร์เน็ตไม่ถึง (พบได้บ่อยกับคอมพิวเตอร์หน้างานในโรงงาน) -->
+  <script src="xlsx.full.min.js"></script>
   <script src="app.js"></script>
   <script src="cost.js"></script>
   <datalist id="srSaleList"></datalist>
@@ -391,6 +395,7 @@
   <script src="finishing.js"></script>
   <script src="kpi.js"></script>
   <script src="overview.js"></script>
+  <script src="store.js"></script>
   <script>if (typeof setView === "function") setView("overview");</script>
 </body>
 </html>
