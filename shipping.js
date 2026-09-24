@@ -1,10 +1,16 @@
 /* ============================================================
    ใบส่งสินค้า (Delivery Note) + Marks & Nos
    - ดึงรายการจาก M/O และ SO ตัวอย่าง (SalesEngine) มารวมเป็น "ใบส่ง" เดียวกันได้หลายรายการ
-     โดยยึดเลข INVOICE เป็นตัวตั้ง (ตรงตามตัวอย่างที่แนบ: M/O 109-115/26 รวมใน INVOICE 058/26)
+     จัดกลุ่มพิมพ์รวมใต้เลข INVOICE เดียวกันได้ (ตรงตามตัวอย่างที่แนบ: M/O 109-115/26 รวมใน INVOICE 058/26)
+     — แต่เลข INVOICE เป็นเพียง "ข้อมูลอ้างอิง/ป้ายพิมพ์" เท่านั้น ไม่มีผลต่อสต๊อก
    - แก้ไข MARKS / MEASURMENT / NOTE ต่อรายการได้อิสระ ไม่ผูกกับข้อมูลเดิมใน M/O
    - แต่ละรายการแตกเป็น "กล่อง/พาเลท" ได้หลายกล่อง (เลข NO. เรียงอัตโนมัติทั้งใบ Invoice) สำหรับพิมพ์ป้าย Marks & Nos ทีละกล่อง
    - พิมพ์ในแอปได้เลย (หน้าต่างพิมพ์ทับเต็มจอ แบบเดียวกับฟอร์ม M/O A3) ไม่ต้องออกไฟล์แยก
+   - "ตัวตัด" สต๊อก: การเพิ่มรายการ M/O,S/O เข้าใบส่ง (มี Marks & Nos) คือจุดที่ทำให้ระบบบันทึกวันที่ส่งจริง
+     (doc.actualShip = วันที่ในใบส่ง) ทันที ไม่ต้องรอกรอกเลข INVOICE ก่อน — ผลคือ Store จะเห็นรายการนั้น
+     "ตัดออกแล้ว" ทันที (ดู markDocShipped/unmarkDocShippedIfOrphaned) ถ้าลบรายการออกจากใบส่งและไม่ได้อยู่ใน
+     ใบส่งอื่นแล้ว ระบบจะคืนสถานะให้อัตโนมัติ ส่วนปุ่ม "ยืนยันส่งจริง" แบบ manual ในหน้าขาย (sales.js) ยังคงใช้
+     เป็นทางเลือกเสริมสำหรับกรณีพิเศษ/ข้อมูลนำเข้าเก่าที่ไม่ได้ผ่านใบส่งนี้
    ต้องโหลดหลัง app.js, sales.js (ใช้ SalesEngine.getDocs/saveDocs, $, $$, toast)
    ============================================================ */
 (function () {
@@ -77,11 +83,31 @@
   }
 
   // ผูกเลข INVOICE กลับเข้าไปในตัว M/O/SO เอง (ช่อง "INV No." เดิมที่มีอยู่แล้วในหน้ารายงานขาย)
+  // หมายเหตุ: เลข INVOICE เป็น "ข้อมูลอ้างอิง/ป้ายพิมพ์" เท่านั้น ไม่มีผลต่อการตัดสต๊อก (ดู markDocShipped ด้านล่าง)
   function markDocInvoice(docId, invoiceNo) {
     const se = SE();
     if (!se || typeof se.getDocs !== "function") return;
     const doc = se.getDocs().find((d) => d.id === docId);
     if (doc) { doc.inv = invoiceNo || ""; if (typeof se.saveDocs === "function") se.saveDocs(); }
+  }
+
+  // ใบส่งของ (มี Marks & Nos) คือตัว "ตัด" M/O,S/O ออกจากสต๊อกสินค้าสำเร็จรูปจริง — เขียนวันที่ส่งจริง (doc.actualShip)
+  // ทันทีที่รายการนั้นถูกเพิ่มเข้าใบส่ง โดยไม่ต้องรอกรอกเลข INVOICE ก่อน (INVOICE เป็นแค่ข้อมูลอ้างอิง)
+  function markDocShipped(docId, shipDate) {
+    const se = SE();
+    if (!se || typeof se.getDocs !== "function") return;
+    const doc = se.getDocs().find((d) => d.id === docId);
+    if (doc) { doc.actualShip = shipDate || new Date().toISOString().slice(0, 10); if (typeof se.saveDocs === "function") se.saveDocs(); }
+  }
+
+  // ถ้าลบรายการออกจากใบส่งแล้ว M/O,S/O นั้นไม่ได้อยู่ในใบส่งอื่นใดอีกเลย ให้คืนสถานะ (ยกเลิกการตัด) อัตโนมัติ
+  function unmarkDocShippedIfOrphaned(docId, excludeShipId) {
+    const stillIn = loadShipments().some((s) => s.id !== excludeShipId && s.lines.some((l) => l.docId === docId));
+    if (stillIn) return;
+    const se = SE();
+    if (!se || typeof se.getDocs !== "function") return;
+    const doc = se.getDocs().find((d) => d.id === docId);
+    if (doc) { doc.actualShip = ""; if (typeof se.saveDocs === "function") se.saveDocs(); }
   }
 
   function rollRangeForLine(ship, lineId) {
@@ -184,7 +210,7 @@
     return `
     <section class="department-panel shp-editor">
       <div class="panel-heading">
-        <div><strong>แก้ไขใบส่ง</strong><small>รวมได้หลาย M/O/SO ต่อ 1 ใบ Invoice — แก้ MARKS/ขนาด/หมายเหตุได้อิสระ ไม่กระทบข้อมูลเดิมในหน้ารายงานขาย</small></div>
+        <div><strong>แก้ไขใบส่ง</strong><small>รวมได้หลาย M/O/SO ต่อ 1 ใบ Invoice — แก้ MARKS/ขนาด/หมายเหตุได้อิสระ ไม่กระทบข้อมูลเดิมในหน้ารายงานขาย · เพิ่มรายการที่นี่ = ตัด M/O,S/O ออกจากสต๊อก Store ทันที (ไม่ต้องรอเลข INVOICE)</small></div>
         <div class="shp-editor-actions">
           <button type="button" class="action-button primary" data-ship-print="note">พิมพ์ใบส่ง</button>
           <button type="button" class="action-button" data-ship-print="marks">พิมพ์ Marks &amp; Nos</button>
@@ -230,7 +256,7 @@
         <div>
           <p class="eyebrow">SHIPPING</p>
           <h1>ใบส่งสินค้า + Marks &amp; Nos</h1>
-          <p class="subtitle">รวม M/O และ SO ตัวอย่างหลายรายการเข้าใบส่งเดียวกันโดยยึดเลข INVOICE เป็นหลัก แล้วพิมพ์ใบส่ง/ป้าย Marks &amp; Nos ได้จากในแอปทันที</p>
+          <p class="subtitle">รวม M/O และ SO ตัวอย่างหลายรายการเข้าใบส่งเดียวกันได้ พิมพ์ใบส่ง/ป้าย Marks &amp; Nos ได้จากในแอปทันที — การเพิ่มรายการเข้าใบส่งคือตัว "ตัด" M/O,S/O ออกจากสต๊อก Store ทันที ส่วนเลข INVOICE เป็นแค่ข้อมูลอ้างอิง/ป้ายพิมพ์เท่านั้น</p>
         </div>
         <div class="heading-actions"><button class="action-button primary" data-ship-new>+ สร้างใบส่งใหม่</button></div>
       </section>
@@ -344,6 +370,8 @@
     ship[field] = value;
     upsertShip(ship);
     if (field === "invoiceNo") ship.lines.forEach((l) => markDocInvoice(l.docId, value));
+    // แก้วันที่ส่งของทั้งใบ ต้องอัปเดตวันที่ตัดของทุกรายการในใบส่งนี้ให้ตรงกันด้วย
+    if (field === "shipDate") ship.lines.forEach((l) => markDocShipped(l.docId, value));
   }
   function updateLine(shipId, lineId, field, value) {
     const ship = findShip(shipId); if (!ship) return;
@@ -364,19 +392,25 @@
       const newBtn = e.target.closest("[data-ship-new]");
       if (newBtn) { const s = blankShipment(); upsertShip(s); state.openId = s.id; state.pickerQuery = ""; renderAll(); return; }
 
-      const openBtn = e.target.closest("[data-ship-open]");
-      if (openBtn) { state.openId = openBtn.dataset.shipOpen; state.pickerQuery = ""; renderAll(); return; }
-
+      // ต้องเช็คปุ่ม "ลบ" ก่อนตัวการ์ด (data-ship-open) เพราะปุ่มลบซ้อนอยู่ข้างในการ์ดนั้นเอง
+      // (closest() จะไปเจอ data-ship-open ของการ์ดแม่ก่อนเสมอถ้าเช็ค data-ship-open ก่อน ทำให้กดลบแล้วกลายเป็นเปิดใบส่งแทน)
       const delBtn = e.target.closest("[data-ship-del]");
       if (delBtn) {
         const id = delBtn.dataset.shipDel;
         if (confirm("ลบใบส่งนี้ทั้งใบ? (ลบแล้วกู้คืนไม่ได้)")) {
+          const doomed = findShip(id);
+          const docIds = doomed ? doomed.lines.map((l) => l.docId) : [];
           deleteShipment(id);
+          // ลบใบส่งทั้งใบแล้ว รายการที่ไม่ได้อยู่ในใบส่งอื่นอีกเลย ให้คืนสถานะ (ยกเลิกการตัด) อัตโนมัติ
+          docIds.forEach((docId) => unmarkDocShippedIfOrphaned(docId, id));
           if (state.openId === id) state.openId = null;
           renderAll();
         }
         return;
       }
+
+      const openBtn = e.target.closest("[data-ship-open]");
+      if (openBtn) { state.openId = openBtn.dataset.shipOpen; state.pickerQuery = ""; renderAll(); return; }
 
       const closeBtn = e.target.closest("[data-ship-close]");
       if (closeBtn) { state.openId = null; renderAll(); return; }
@@ -389,8 +423,9 @@
           ship.lines.push({ id: uid("LN"), docId: doc.id, market: doc.market, type: doc.type, no: doc.no, customer: doc.customer, project: doc.project, marks: doc.project || "", measurement: "", note: "" });
           upsertShip(ship);
           if (ship.invoiceNo) markDocInvoice(doc.id, ship.invoiceNo);
+          markDocShipped(doc.id, ship.shipDate); // ใบส่ง (Marks & Nos) คือตัวตัด M/O,S/O — ไม่ต้องรอเลข INVOICE
           state.pickerQuery = "";
-          toast(`เพิ่ม ${docLabel(doc)} เข้าใบส่งแล้ว`);
+          toast(`เพิ่ม ${docLabel(doc)} เข้าใบส่งแล้ว — ตัดออกจากสต๊อก Store แล้ว`);
           renderAll();
         }
         return;
@@ -401,9 +436,12 @@
         const ship = findShip(state.openId);
         if (ship) {
           const lineId = rmLine.dataset.shipRmline;
+          const removedLine = ship.lines.find((l) => l.id === lineId);
           ship.lines = ship.lines.filter((l) => l.id !== lineId);
           ship.cartons = ship.cartons.filter((c) => c.lineId !== lineId);
           upsertShip(ship);
+          // ลบรายการออกจากใบส่งนี้แล้ว ถ้าไม่ได้อยู่ในใบส่งอื่นอีกเลย ให้คืนสถานะ (ยกเลิกการตัด) อัตโนมัติ
+          if (removedLine) unmarkDocShippedIfOrphaned(removedLine.docId, ship.id);
           renderAll();
         }
         return;

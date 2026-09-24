@@ -194,24 +194,48 @@
     return has(zone.colorCode) ? `${kind} · สี ${zone.colorCode}` : `${kind}`;
   }
 
+  // ============================================================
+  // สีผสม (Stipple) — บางโซนไม่ได้ทอด้วยแม่สีเดียว แต่ควบเส้นไหมหลายแม่สีเข้าด้วยกัน (เช่น สี A4 5 เส้น + สี C4 1 เส้น
+  // ต่อ 1 จุด = อัตราส่วน 5:1) ให้กรอกเป็น "จำนวนเส้นไหม" ต่อแม่สี แล้วระบบคำนวณ % ของแต่ละแม่สีจากสัดส่วนเส้นให้เอง
+  // (ตรงกับสูตร "ตารางที่ 2 คำนวณสำหรับสีผสม" ในไฟล์ฟอร์มคำนวณไหม.xlsx — ผู้ใช้ยืนยันแล้ว)
+  // ถ้าไม่ได้เปิดโหมดผสมสี ให้ถือว่าโซนนั้นเป็นแม่สีเดียว (colorCode) 100% เหมือนเดิมทุกประการ (ย้อนหลังใช้ได้กับข้อมูลเก่า)
+  // ============================================================
+  function zoneMixComponents(zone) {
+    if (zone.mixEnabled && Array.isArray(zone.mix)) {
+      const rows = zone.mix.filter((m) => has(m.colorCode) && num(m.strands) > 0);
+      const totalStrands = rows.reduce((t, m) => t + num(m.strands), 0);
+      if (rows.length && totalStrands > 0) {
+        return rows.map((m) => ({ colorCode: m.colorCode.trim(), strands: num(m.strands), totalStrands, pct: (num(m.strands) / totalStrands) * 100 }));
+      }
+    }
+    return [{ colorCode: zone.colorCode, strands: 1, totalStrands: 1, pct: 100 }];
+  }
+
   function computeZone(zone, totalAreaSqm) {
     const areaSqm = zone.byArea ? num(zone.area) : totalAreaSqm * (num(zone.pct) / 100);
     const structure = (zone.weaveType === "loop") ? "loop" : "cut"; // tipshear ใช้สูตร cut (ก่อนเจียร์) ตามกฎที่ยืนยัน
     const spec = { structure, S: zone.S, R: zone.R, FPH: zone.FPH, TPH: zone.TPH, PH: zone.FPH, Tex: zone.Tex, N: zone.N };
     const weightPerSqmKg = (has(zone.S) && has(zone.Tex) && has(zone.N) && (structure === "loop" ? has(zone.FPH) : (has(zone.FPH) && has(zone.TPH)))) ? dyeWeightPerSqmKg(spec) : 0;
     const baseKg = areaSqm * weightPerSqmKg;
-    return { ...zone, areaSqm, weightPerSqmKg, baseKg };
+    const mixComponents = zoneMixComponents(zone).map((c) => ({ ...c, areaSqm: areaSqm * (c.pct / 100), baseKg: baseKg * (c.pct / 100) }));
+    return { ...zone, areaSqm, weightPerSqmKg, baseKg, mixComponents };
   }
 
   function computeDyePlan(zones, totalAreaSqm, bufferPct) {
     const computedZones = zones.map((z) => computeZone(z, totalAreaSqm));
     const potMap = new Map();
-    computedZones.forEach((z) => {
-      const key = potKeyOf(z);
-      if (!potMap.has(key)) potMap.set(key, { key, label: potLabelOf(z), zones: [], baseKg: 0 });
-      const pot = potMap.get(key);
-      pot.zones.push(z);
-      pot.baseKg += z.baseKg;
+    computedZones.forEach((z, zi) => {
+      // แต่ละองค์ประกอบสีผสม (แม่สี) ในโซนนี้ ให้แยกไปสมทบหม้อย้อมของแม่สีนั้นตามสัดส่วนเส้นไหม —
+      // ถ้าโซนนี้ไม่ได้ผสมสี mixComponents จะมีแค่ 1 รายการ (แม่สีเดียว 100%) เหมือนพฤติกรรมเดิมทุกประการ
+      z.mixComponents.forEach((comp) => {
+        const compZone = { ...z, colorCode: comp.colorCode };
+        const key = potKeyOf(compZone);
+        if (!potMap.has(key)) potMap.set(key, { key, label: potLabelOf(compZone), zones: [], baseKg: 0, contributions: [] });
+        const pot = potMap.get(key);
+        pot.zones.push(z);
+        pot.baseKg += comp.baseKg;
+        pot.contributions.push({ zoneIdx: zi, colorCode: comp.colorCode, strands: comp.strands, totalStrands: comp.totalStrands, pct: comp.pct, baseKg: comp.baseKg, mixed: z.mixComponents.length > 1 });
+      });
     });
     const pots = [...potMap.values()].map((p) => ({ ...p, netKg: p.baseKg * (1 + num(bufferPct) / 100) }));
     const totalPct = zones.reduce((t, z) => t + (z.byArea ? (totalAreaSqm ? num(z.area) / totalAreaSqm * 100 : 0) : num(z.pct)), 0);
@@ -331,7 +355,7 @@
   window.PlanningEngine = {
     YARN_TYPES_DEFAULT, cutWeight, loopWeight, dyeWeightPerSqmKg, seedPresets,
     WEAVE_GRADES, PUNCH_GRADES, FINISH_GRADES, WAGE_GLUE_FINISH, suggestGrade,
-    potKeyOf, potLabelOf, computeZone, computeDyePlan,
+    potKeyOf, potLabelOf, computeZone, computeDyePlan, zoneMixComponents, blankMixRow,
     deptDays, dateToOffset, offsetToDate, fmtThaiDate, computeSchedule, laborCost,
     DYE_METHODS, isoDate, isoToDate, blankDyeOrder, dyeOrderCost,
     blankWeaveOutsource, weaveOutsourceCost,
@@ -375,12 +399,13 @@
 
   // สร้างโซนใหม่ 1 แถว — ให้ "AI" (ระบบ) เลือกคุณภาพ (preset) ที่ใกล้เคียงที่สุดให้อัตโนมัติ แทนที่จะบังคับกรอกพารามิเตอร์ทอเองทุกครั้ง
   // like: โซนก่อนหน้า (ใช้เทคนิคทอ/ชนิดไหมเดียวกันต่อ) — ไม่ระบุ = เริ่มจากค่าเริ่มต้นมาตรฐาน (HWO 45, Cut to Side)
+  function blankMixRow(colorCode) { return { id: uid("mx"), colorCode: colorCode || "", strands: 1 }; }
   function blankZone(like, presets) {
     const yarnCode = (like && like.yarnCode) || "HWO";
     const weaveType = (like && like.weaveType) || "cutside";
     const structure = weaveType === "loop" ? "loop" : "cut";
     const yt = YARN_TYPES_DEFAULT.find((y) => y.code === yarnCode) || YARN_TYPES_DEFAULT[0];
-    const zone = { id: uid("z"), name: "", colorCode: "", weaveType, byArea: false, pct: 0, area: 0, presetId: "", yarnCode: yt.code, S: 28, R: 12, FPH: 9, TPH: 11, N: 4, Tex: yt.tex };
+    const zone = { id: uid("z"), name: "", colorCode: "", weaveType, byArea: false, pct: 0, area: 0, presetId: "", yarnCode: yt.code, S: 28, R: 12, FPH: 9, TPH: 11, N: 4, Tex: yt.tex, mixEnabled: false, mix: [] };
     const list = presets || [];
     const preset = list.find((p) => p.yarnCode === yt.code && p.structure === structure && p.quality === "45") || list.find((p) => p.yarnCode === yt.code && p.structure === structure);
     if (preset) applyPresetToZone(zone, preset);
@@ -390,7 +415,7 @@
     return {
       designId, moNo: moNo || "", totalAreaSqm: totalAreaSqm || 0, areaSource: totalAreaSqm ? "auto" : "manual",
       patternPct: 50, weaveGradeOverride: "", punchMethodOverride: "", finishGradeOverride: "",
-      bufferPct: 10, zones: [blankZone(null, loadPresets())],
+      bufferPct: 5, zones: [blankZone(null, loadPresets())],
       hoursPerDay: 8, loomCount: 2, punchWorkers: 1, finishWorkers: 2, dyeDays: 3,
       weaveWorkers: [], punchWorkerNames: [], finishWorkerNames: [], dyeOrders: {}, weaveOutsource: null, savedAt: null
     };
@@ -449,13 +474,37 @@
       : `S${esc(zone.S)} · R${esc(zone.R)} · FPH${esc(zone.FPH)}/TPH${esc(zone.TPH)}มม. · Tex${esc(zone.Tex)} · N${esc(zone.N)}`;
   }
 
+  // แถวย่อยของ "แม่สี" หนึ่งตัวในสีผสม (Stipple) — กรอกรหัสสี + จำนวนเส้นไหม แล้วระบบคำนวณ % ให้เอง
+  function mixRowHtml(zone, m) {
+    const filtered = (zone.mix || []).filter((x) => has(x.colorCode) && num(x.strands) > 0);
+    const compIdx = filtered.findIndex((x) => x.id === m.id);
+    const comps = zone.mixComponents || [];
+    const pct = compIdx >= 0 && comps[compIdx] ? comps[compIdx].pct : null;
+    return `<div class="pw-mix-row" data-mixrow="${zone.id}:${m.id}">
+      <input name="mixColor" value="${esc(m.colorCode)}" placeholder="รหัสสี" class="pw-mix-color" title="รหัสแม่สี">
+      <input name="mixStrands" value="${esc(m.strands)}" inputmode="decimal" placeholder="เส้น" class="pw-mix-strands" title="จำนวนเส้นไหมของแม่สีนี้">
+      <small class="pw-mix-pct">${pct != null ? fmt(pct, 1) + "%" : "-"}</small>
+      <button type="button" class="pw-mix-del" data-del-mix="${zone.id}:${m.id}" title="ลบแม่สีนี้">×</button>
+    </div>`;
+  }
+  // เซลล์ "รหัสสี" ของแต่ละโซน — โหมดปกติ (แม่สีเดียว) หรือโหมดผสมสี (Stipple, หลายแม่สีต่อโซน ตามจำนวนเส้นไหม)
+  function zoneColorCellHtml(zone) {
+    const totalStrands = zone.mixEnabled ? (zone.mixComponents || []).reduce((t, c) => t + c.strands, 0) : 0;
+    return `<label class="pw-toggle pw-mix-toggle"><input type="checkbox" name="mixEnabled" ${zone.mixEnabled ? "checked" : ""}> ผสมสี (Stipple)</label>
+      ${zone.mixEnabled
+        ? `<div class="pw-mix-rows">${(zone.mix && zone.mix.length ? zone.mix : []).map((m) => mixRowHtml(zone, m)).join("")}</div>
+           <button type="button" class="pw-mix-add" data-add-mix="${zone.id}">+ แม่สี</button>
+           ${totalStrands ? `<small class="muted">รวม ${totalStrands} เส้น</small>` : ""}`
+        : `<input name="colorCode" value="${esc(zone.colorCode)}" placeholder="เช่น 34B" class="pw-colorcode">`}`;
+  }
+
   function zoneRowHtml(zone, idx, presets, computed) {
     const isLoop = zone.weaveType === "loop";
     const custom = !zone.presetId;
     const w = computed ? computed.weightPerSqmKg : 0, a = computed ? computed.areaSqm : 0, kg = computed ? computed.baseKg : 0;
     return `<tr data-zone="${zone.id}">
       <td>${idx + 1}</td>
-      <td><input name="colorCode" value="${esc(zone.colorCode)}" placeholder="เช่น 34B" class="pw-colorcode"></td>
+      <td class="pw-color-cell">${zoneColorCellHtml(zone)}</td>
       <td><select name="weaveType">${Object.entries(WEAVE_TYPE_LABEL).map(([k, v]) => `<option value="${k}" ${zone.weaveType === k ? "selected" : ""}>${v}</option>`).join("")}</select></td>
       <td class="pw-pctarea">
         <label class="pw-toggle"><input type="checkbox" name="byArea" ${zone.byArea ? "checked" : ""}> ตร.ม.</label>
@@ -480,9 +529,33 @@
     </tr>`;
   }
 
+  // แสดงที่มาของน้ำหนักไหมในหม้อย้อม เฉพาะเมื่อมีโซนสีผสม (Stipple) สมทบเข้ามา — ให้เห็นว่าแม่สีนี้มาจากโซนไหน
+  // กี่เส้นจากกี่เส้น (สัดส่วน) คิดเป็นกี่กิโลกรัม เพื่อตรวจสอบย้อนกลับได้ก่อนสั่งย้อมจริง
+  function potContributionHtml(pot) {
+    const mixed = (pot.contributions || []).filter((c) => c.mixed);
+    if (!mixed.length) return "";
+    return `<details class="pw-mix-detail"><summary>ที่มา (สีผสม)</summary><ul>${mixed.map((c) => `<li>โซน #${c.zoneIdx + 1}: ${c.strands}/${c.totalStrands} เส้น (${fmt(c.pct, 1)}%) = ${fmt(c.baseKg, 3)} กก.</li>`).join("")}</ul></details>`;
+  }
+
   function gradeTagHtml(label, grade, extra = "") {
     if (!grade) return `<div class="pr"><small>${label}</small><strong>-</strong></div>`;
     return `<div class="pr"><small>${label}</small><strong>เกรด ${grade.grade}</strong><span>${extra}</span></div>`;
+  }
+
+  // "วันที่ส่งงานให้แผนก" ต่อแผนก (ตอกลาย/ขยายลาย, ทอในบริษัท, ตกแต่ง, สโตร์) — ผูกกับ Master Plan อัตโนมัติ
+  // เหมือนวันที่ใบสั่งย้อม/จ้างทอนอกด้านบน แต่แก้เองได้ทุกแผนก ถ้าแก้เองแล้วจะไม่ถูกคำนวณทับอีก (Auto=false)
+  const DEPT_SENT_LABELS = { punch: "ตอกลาย/ขยายลาย", weave: "ทอ (ในบริษัท)", finish: "ตกแต่ง", store: "สโตร์" };
+  function blankDeptSentDate(seg) { return { date: isoDate(offsetToDate(seg.start)), auto: true }; }
+  function syncDeptSentDates(p, sched) {
+    if (!p.deptSentDates) p.deptSentDates = {};
+    const segByKey = { punch: sched.segs[0], weave: sched.segs[2], finish: sched.segs[3], store: sched.segs[4] };
+    Object.keys(DEPT_SENT_LABELS).forEach((key) => {
+      const seg = segByKey[key];
+      if (!p.deptSentDates[key]) p.deptSentDates[key] = blankDeptSentDate(seg);
+      const rec = p.deptSentDates[key];
+      if (rec.auto !== false) rec.date = isoDate(offsetToDate(seg.start));
+    });
+    return p.deptSentDates;
   }
 
   // ผูก "ใบสั่งย้อม" แต่ละหม้อกับหม้อย้อมที่คำนวณสด ๆ ทุกครั้ง — สร้างค่าเริ่มต้นถ้ายังไม่มี และซิงก์วันที่กับ Master Plan ถ้ายังไม่ถูก override เอง
@@ -565,6 +638,7 @@
     const dyeOrderGrandTotal = dyeOrderRows.reduce((t, r) => t + (r.order.source === "outsource" ? dyeOrderCost(r.order, r.pot.netKg).total : 0), 0);
     const weaveOut = syncWeaveOutsource(p, weaveSeg, weaveGrade ? weaveGrade.grade : "");
     const weaveOutCost = weaveOutsourceCost(weaveOut, p.totalAreaSqm, dye.totalNetKg);
+    const deptSentDates = syncDeptSentDates(p, sched);
 
     const showGradeEdit = Boolean(state.editGrades || p.weaveGradeOverride || p.punchMethodOverride || p.finishGradeOverride);
 
@@ -612,7 +686,7 @@
         </div>
         <div class="pw-pot-scroll"><table class="calc-table">
           <thead><tr><th>หม้อย้อม</th><th>จำนวนโซน</th><th class="num">น้ำหนักฐาน (กก.)</th><th class="num">สั่งย้อมสุทธิ +${fmt(num(p.bufferPct), 0)}% (กก.)</th></tr></thead>
-          <tbody>${dye.pots.length ? dye.pots.map((pot) => `<tr><td>${esc(pot.label)}</td><td>${pot.zones.length}</td><td class="num">${fmt(pot.baseKg, 3)}</td><td class="num"><strong>${fmt(pot.netKg, 3)}</strong></td></tr>`).join("") : `<tr><td colspan="4" class="empty-gantt">ยังไม่มีโซน</td></tr>`}</tbody>
+          <tbody>${dye.pots.length ? dye.pots.map((pot) => `<tr><td>${esc(pot.label)}${potContributionHtml(pot)}</td><td>${pot.zones.length}</td><td class="num">${fmt(pot.baseKg, 3)}</td><td class="num"><strong>${fmt(pot.netKg, 3)}</strong></td></tr>`).join("") : `<tr><td colspan="4" class="empty-gantt">ยังไม่มีโซน</td></tr>`}</tbody>
         </table></div>
       </div>
     </section>
@@ -632,6 +706,15 @@
           <tbody>${sched.segs.map((s) => `<tr><td><span class="legend ${s.color}"></span>${s.dept}</td><td>${esc(s.name)}</td><td class="num">${fmt(s.days, 1)}</td><td>${fmtThaiDate(offsetToDate(s.start))}</td><td>${fmtThaiDate(offsetToDate(s.end))}</td></tr>`).join("")}</tbody>
         </table></div>
         <div class="pw-row"><span class="tag-total">รวมระยะเวลาผลิตทั้งหมด ≈ ${fmt(sched.totalDays, 1)} วัน (${fmtThaiDate(sched.startDate)} – ${fmtThaiDate(sched.endDate)})</span></div>
+        <div class="pw-dept-dates">
+          <small class="muted">วันที่ส่งงานให้แผนก — คำนวณจากตารางเวลาข้างบนอัตโนมัติ แก้เองได้ทุกแผนกถ้าวันจริงไม่ตรง</small>
+          <div class="pw-row">${Object.entries(DEPT_SENT_LABELS).map(([key, label]) => {
+            const rec = deptSentDates[key];
+            const seg = { punch: sched.segs[0], weave: sched.segs[2], finish: sched.segs[3], store: sched.segs[4] }[key];
+            const mismatch = rec.auto === false && rec.date !== isoDate(offsetToDate(seg.start));
+            return `<label class="pf ${mismatch ? "warn-label" : ""}" data-dept-date="${key}">${esc(label)}<input type="date" name="deptDate" value="${esc(rec.date)}"></label>`;
+          }).join("")}</div>
+        </div>
       </div>
     </section>
 
@@ -757,6 +840,20 @@
       }
       const delZone = e.target.closest("[data-del-zone]");
       if (delZone) { state.plan.zones = state.plan.zones.filter((z) => z.id !== delZone.dataset.delZone); renderForm(); return; }
+      const addMix = e.target.closest("[data-add-mix]");
+      if (addMix) {
+        const zone = zoneById(addMix.dataset.addMix);
+        if (zone) { if (!Array.isArray(zone.mix)) zone.mix = []; zone.mix.push(blankMixRow()); renderForm(); }
+        return;
+      }
+      const delMix = e.target.closest("[data-del-mix]");
+      if (delMix) {
+        const [zoneId, mixId] = delMix.dataset.delMix.split(":");
+        const zone = zoneById(zoneId);
+        if (zone && Array.isArray(zone.mix)) zone.mix = zone.mix.filter((m) => m.id !== mixId);
+        renderForm();
+        return;
+      }
       const save = e.target.closest("[data-save-plan]");
       if (save) { commitPlan(); return; }
       const toggleGrade = e.target.closest("[data-toggle-grade-edit]");
@@ -787,12 +884,25 @@
     });
     root.addEventListener("input", (e) => {
       if (!state.plan) return;
+      const mixRow = e.target.closest("[data-mixrow]");
+      if (mixRow) {
+        const [zoneId, mixId] = mixRow.dataset.mixrow.split(":");
+        const zone = zoneById(zoneId);
+        const m = zone && Array.isArray(zone.mix) && zone.mix.find((x) => x.id === mixId);
+        if (m) {
+          if (e.target.name === "mixColor") m.colorCode = e.target.value;
+          else if (e.target.name === "mixStrands") m.strands = e.target.value;
+          renderForm();
+        }
+        return;
+      }
       const zoneRow = e.target.closest("[data-zone]");
       if (zoneRow) {
         const zone = zoneById(zoneRow.dataset.zone);
         if (!zone) return;
         const name = e.target.name;
         if (name === "byArea") zone.byArea = e.target.checked;
+        else if (name === "mixEnabled") { zone.mixEnabled = e.target.checked; if (zone.mixEnabled && (!Array.isArray(zone.mix) || !zone.mix.length)) zone.mix = [blankMixRow(), blankMixRow()]; }
         else if (["S", "R", "FPH", "TPH", "N", "Tex", "pct", "area"].includes(name)) { zone[name] = e.target.value; if (name !== "pct" && name !== "area") zone.presetId = ""; }
         else zone[name] = e.target.value;
         renderForm();
@@ -807,6 +917,16 @@
         if (name === "issueDate") { order.issueDate = e.target.value; order.issueDateAuto = false; }
         else if (name === "needDate") { order.needDate = e.target.value; order.needDateAuto = false; }
         else order[name] = e.target.value;
+        renderForm();
+        return;
+      }
+      const deptDate = e.target.closest("[data-dept-date]");
+      if (deptDate) {
+        if (!state.plan.deptSentDates) state.plan.deptSentDates = {};
+        const key = deptDate.dataset.deptDate;
+        if (!state.plan.deptSentDates[key]) state.plan.deptSentDates[key] = { date: "", auto: true };
+        state.plan.deptSentDates[key].date = e.target.value;
+        state.plan.deptSentDates[key].auto = false;
         renderForm();
         return;
       }

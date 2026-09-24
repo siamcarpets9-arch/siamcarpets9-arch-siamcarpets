@@ -735,11 +735,43 @@
   // แบบเดียวกับตอนนำเข้า MASTER PLAN เพื่อจับคู่ให้ตรงข้ามรูปแบบเหล่านี้ได้
   function normMoKey(raw) {
     const s = String(raw || "").trim().toUpperCase();
-    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*\/\s*0*(\d+)/);
+    // รองรับทั้ง "148/26", "TH123.26" และ "TH 123-26" (แต่ละหน้างาน/ระบบพิมพ์ตัวคั่นปีไม่เหมือนกัน)
+    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*[/.-]\s*0*(\d+)/);
     if (!m) return s.replace(/\s+/g, "");
     const [, prefix, num2, yy] = m;
     return `${prefix}|${num2}|${yy}`;
   }
+  // ชีตรายวันบางแบบ (เช่น "1-9-26", "23-9-26 (2)") ไม่มีวันที่กำกับทุกแถว — มีแค่หัวกระดาษเดียว
+  // ใช้ชื่อชีตเป็นแหล่งสำรองของวันที่ เพื่อไม่ให้แถวข้อมูลเหล่านี้ถูกข้ามไปทั้งหมด
+  function parseDateFromSheetName(name) {
+    const m = String(name || "").trim().match(/^(\d{1,2})-(\d{1,2})-(\d{2})(?:\s*\(\d+\))?$/);
+    if (!m) return null;
+    const [, d, mo, yy] = m;
+    const year = 2000 + Number(yy);
+    const day = Number(d), month = Number(mo);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+  function cellToIso(v) {
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    if (typeof v === "number" && v > 20000) { const d = XLSX.SSF ? XLSX.SSF.parse_date_code(v) : null; if (d) return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`; }
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+    return null;
+  }
+  // บางไฟล์ (แบบใบพิมพ์รายวัน) เขียนวันที่ไว้ที่หัวกระดาษเป็นข้อความ "วันที่ :______" แล้วค่าวันที่จริง
+  // (ตัวเลขวันที่ของ Excel) จะอยู่ในเซลล์ถัดไปบนแถวเดียวกัน — น่าเชื่อถือกว่าชื่อชีต (ชื่อชีตอาจพิมพ์ผิดได้)
+  function findHeaderDateInAoa(aoa) {
+    for (let i = 0; i < Math.min(aoa.length, 6); i++) {
+      const row = aoa[i] || [];
+      const hasLabel = row.some((c) => typeof c === "string" && c.includes("วันที่"));
+      if (!hasLabel) continue;
+      for (const c of row) { const iso = cellToIso(c); if (iso) return iso; }
+    }
+    return null;
+  }
+  // แถวหัวกระดาษ "วันที่ :______" ไม่ใช่แถวข้อมูลการผลิต ต้องข้ามทิ้งไปเลย ไม่ว่าคอลัมน์ M/O (index 2)
+  // จะบังเอิญมีค่าตัวเลข (เช่น เลขวันที่ของ Excel ที่เยื้องมาอยู่คอลัมน์นี้) ก็ตาม
+  function isHeaderRow(row) { return row.some((c) => typeof c === "string" && c.includes("วันที่") && c.includes(":")); }
   function findDesignIdByMoNo(moNo) {
     try {
       if (typeof SalesEngine === "undefined" || !SalesEngine.getDocs) return null;
@@ -782,45 +814,67 @@
 
   async function importExcel(file) {
     if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
-    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-    let imported = 0, skippedNoMatch = 0, skippedNoDate = 0;
+    let wb;
+    try {
+      wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    } catch (e) {
+      toast("นำเข้าไม่สำเร็จ — ไฟล์นี้อ่านไม่ได้ (ไม่ใช่ไฟล์ .xlsx ที่ถูกต้อง หรือไฟล์เสียหาย): " + (e && e.message ? e.message : e));
+      console.error("[weave-floor import] อ่านไฟล์ไม่สำเร็จ", e);
+      return;
+    }
+    let imported = 0, skippedNoMatch = 0, skippedNoDate = 0, skippedDup = 0;
     const unmatched = new Set();
-    wb.SheetNames.forEach((sheetName) => {
-      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "", raw: true });
-      aoa.forEach((row) => {
-        const dateCell = row[0];
-        let iso = null;
-        if (dateCell instanceof Date) iso = dateCell.toISOString().slice(0, 10);
-        else if (typeof dateCell === "number" && dateCell > 20000) { const d = XLSX.SSF ? XLSX.SSF.parse_date_code(dateCell) : null; if (d) iso = `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`; }
-        else if (typeof dateCell === "string" && /^\d{4}-\d{2}-\d{2}/.test(dateCell)) iso = dateCell.slice(0, 10);
-        const moNo = row[2];
-        if (!has(moNo) || String(moNo).toLowerCase().includes("m/o")) return; // ข้ามหัวตาราง
-        if (!iso) { skippedNoDate++; return; }
-        const designId = findDesignIdByMoNo(moNo);
-        if (!designId) { skippedNoMatch++; unmatched.add(String(moNo)); return; }
-        const plan = ensurePlanForImport(designId); // สร้างแผนพื้นฐานอัตโนมัติถ้ายังไม่เคยวางแผนไว้ในระบบนี้
-        const dfloor = ensureDesignFloor(designId);
-        const lines = linesOf(designId, plan);
-        let lineIdx = lines.findIndex((l) => (l.location || "").trim() === String(row[5] || "").trim());
-        if (lineIdx < 0) lineIdx = 0;
-        const piece = ensurePieceRec(dfloor, lineIdx);
-        if (!piece.loomNo && has(row[1])) piece.loomNo = String(row[1]);
-        if (!piece.gradeOverride && has(row[4])) piece.gradeOverride = String(row[4]).trim(); // เกรดจริงจากรายงาน (คอลัมน์ E)
-        const day = ensureDayRec(piece, iso);
-        // คอลัมน์ตามฟอร์แมต SEP: 8=คงเหลือยกมา(ปกติ) 9=พ.ท.ทำได้ 11=จำนวนพนักงาน 12=เริ่ม 13=เลิก 17=รายชื่อ ; OT: 18.. 27=รายชื่อ
-        if (has(row[9])) day.normal.doneSqm = num(row[9]);
-        if (has(row[12])) day.normal.start = String(row[12]);
-        if (has(row[13])) day.normal.end = String(row[13]);
-        if (has(row[17])) day.normal.workers = String(row[17]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
-        if (has(row[19])) day.ot.doneSqm = num(row[19]);
-        if (has(row[22])) day.ot.start = String(row[22]);
-        if (has(row[23])) day.ot.end = String(row[23]);
-        if (has(row[27])) day.ot.workers = String(row[27]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
-        saveDesignFloor(designId, dfloor);
-        imported++;
+    const seenKeys = new Set(); // กันนับซ้ำ/เขียนซ้ำ เมื่อข้อมูลแถวเดียวกันปรากฏทั้งในชีตสรุป (เช่น "SEP") และชีตรายวันแยก
+    try {
+      wb.SheetNames.forEach((sheetName) => {
+        const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "", raw: true });
+        // ลำดับความน่าเชื่อถือของวันที่สำรอง (ใช้เมื่อแถวข้อมูลเองไม่มีวันที่กำกับ):
+        // 1) วันที่ที่เขียนไว้ที่หัวกระดาษของชีตเอง (แม่นยำที่สุด) 2) ชื่อชีต (เผื่อพิมพ์หัวกระดาษผิด)
+        const sheetFallbackIso = findHeaderDateInAoa(aoa) || parseDateFromSheetName(sheetName);
+        aoa.forEach((row) => {
+          if (isHeaderRow(row)) return; // แถว "วันที่ :______" ของหัวกระดาษ ไม่ใช่แถวข้อมูล
+          const iso0 = cellToIso(row[0]);
+          const moNo = row[2];
+          if (!has(moNo) || String(moNo).toLowerCase().includes("m/o")) return; // ข้ามหัวตาราง
+          if (typeof moNo === "number") return; // M/O จริงต้องเป็นข้อความรูปแบบ "NNN/YY" เสมอ ไม่ใช่ตัวเลขล้วน (กันเลขวันที่ที่เยื้องคอลัมน์มาปนกับ M/O)
+          // บางไฟล์ (เช่นชีตแยกรายวันสำหรับพิมพ์กระดาษ) มีวันที่แค่หัวกระดาษ ไม่กำกับทุกแถว —
+          // ถ้าอ่านวันที่จากแถวไม่ได้ ให้ลองใช้วันที่สำรองของทั้งชีตแทนก่อนจะข้าม
+          const iso = iso0 || sheetFallbackIso;
+          if (!iso) { skippedNoDate++; return; }
+          const designId = findDesignIdByMoNo(moNo);
+          if (!designId) { skippedNoMatch++; unmatched.add(String(moNo)); return; }
+          const plan = ensurePlanForImport(designId); // สร้างแผนพื้นฐานอัตโนมัติถ้ายังไม่เคยวางแผนไว้ในระบบนี้
+          const dfloor = ensureDesignFloor(designId);
+          const lines = linesOf(designId, plan);
+          let lineIdx = lines.findIndex((l) => (l.location || "").trim() === String(row[5] || "").trim());
+          if (lineIdx < 0) lineIdx = 0;
+          const dupKey = `${designId}|${iso}|${lineIdx}`;
+          if (seenKeys.has(dupKey)) { skippedDup++; return; } // ชีตสรุป+ชีตรายวันมักมีแถวเดียวกันซ้ำกัน — เอาที่เจอก่อนพอ
+          seenKeys.add(dupKey);
+          const piece = ensurePieceRec(dfloor, lineIdx);
+          if (!piece.loomNo && has(row[1])) piece.loomNo = String(row[1]);
+          if (!piece.gradeOverride && has(row[4])) piece.gradeOverride = String(row[4]).trim(); // เกรดจริงจากรายงาน (คอลัมน์ E)
+          const day = ensureDayRec(piece, iso);
+          // คอลัมน์ตามฟอร์แมต SEP: 8=คงเหลือยกมา(ปกติ) 9=พ.ท.ทำได้ 11=จำนวนพนักงาน 12=เริ่ม 13=เลิก 17=รายชื่อ ; OT: 18.. 27=รายชื่อ
+          if (has(row[9])) day.normal.doneSqm = num(row[9]);
+          if (has(row[12])) day.normal.start = String(row[12]);
+          if (has(row[13])) day.normal.end = String(row[13]);
+          if (has(row[17])) day.normal.workers = String(row[17]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+          if (has(row[19])) day.ot.doneSqm = num(row[19]);
+          if (has(row[22])) day.ot.start = String(row[22]);
+          if (has(row[23])) day.ot.end = String(row[23]);
+          if (has(row[27])) day.ot.workers = String(row[27]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+          saveDesignFloor(designId, dfloor);
+          imported++;
+        });
       });
-    });
-    toast(`นำเข้าเสร็จ: บันทึก ${imported} แถว · ข้าม (ไม่พบ M/O ที่ตรงกัน) ${skippedNoMatch} แถว · ข้าม (อ่านวันที่ไม่ได้) ${skippedNoDate} แถว`);
+    } catch (e) {
+      toast("นำเข้าไม่สำเร็จระหว่างอ่านข้อมูล — โครงสร้างไฟล์อาจไม่ตรงตามฟอร์แมตที่รองรับ: " + (e && e.message ? e.message : e));
+      console.error("[weave-floor import] เกิดข้อผิดพลาดระหว่างประมวลผล", e);
+      renderAll();
+      return;
+    }
+    toast(`นำเข้าเสร็จ: บันทึก ${imported} แถว · ข้าม (ไม่พบ M/O ที่ตรงกัน) ${skippedNoMatch} แถว · ข้าม (อ่านวันที่ไม่ได้) ${skippedNoDate} แถว${skippedDup ? ` · ข้าม (ซ้ำ) ${skippedDup} แถว` : ""}`);
     if (unmatched.size) console.warn("[weave-floor import] ไม่พบ M/O ที่ตรงกันในระบบ:", [...unmatched].slice(0, 30));
     renderAll();
   }
