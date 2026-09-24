@@ -16,6 +16,49 @@
   const readJson = (k, fb) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch (e) { return fb; } };
   const writeJson = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ยังใช้ต่อได้ */ } };
   const PE = () => window.PlanningEngine;
+  // แก้ปัญหาช่องกรอกข้อมูล "เด้งออก" (เสียโฟกัส) ทุกครั้งที่พิมพ์ — saveField() เรียก renderAll() ซึ่งเขียนทับ
+  // #ppForm ทั้งก้อนทุกครั้ง ทำให้ input ที่กำลังโฟกัสอยู่ถูกทำลายทิ้งแล้วสร้างใหม่ ต้องจับตำแหน่งไว้ก่อน render แล้วคืนกลับ
+  function captureFocus(root) {
+    const el = document.activeElement;
+    if (!el || !root.contains(el) || !el.name) return null;
+    let node = el, dataAttr = null;
+    while (node && node !== root) {
+      if (node.attributes) {
+        for (const attr of node.attributes) {
+          if (attr.name.startsWith("data-")) { dataAttr = { name: attr.name, value: attr.value }; break; }
+        }
+      }
+      if (dataAttr) break;
+      node = node.parentElement;
+    }
+    return {
+      name: el.name, dataAttr,
+      selStart: (typeof el.selectionStart === "number") ? el.selectionStart : null,
+      selEnd: (typeof el.selectionEnd === "number") ? el.selectionEnd : null,
+      scrollTop: root.scrollTop
+    };
+  }
+  function restoreFocus(root, info) {
+    if (!info) return;
+    let candidates = [...root.querySelectorAll(`[name="${CSS.escape(info.name)}"]`)];
+    if (info.dataAttr && candidates.length > 1) {
+      candidates = candidates.filter((c) => {
+        let n = c;
+        while (n && n !== root) {
+          if (n.getAttribute && n.getAttribute(info.dataAttr.name) === info.dataAttr.value) return true;
+          n = n.parentElement;
+        }
+        return false;
+      });
+    }
+    const el = candidates[0];
+    if (!el) return;
+    el.focus();
+    if (info.selStart != null && typeof el.setSelectionRange === "function") {
+      try { el.setSelectionRange(info.selStart, info.selEnd); } catch (e) { /* บาง input type ไม่รองรับ */ }
+    }
+    root.scrollTop = info.scrollTop;
+  }
 
   const KEY_PATTERN = "siam-pattern-orders"; // { [designId]: {designWidthM, designLengthM, sideAllowanceM, endAllowanceM, storeBufferPct, requisitionIssued, requisitionAt} }
 
@@ -260,7 +303,10 @@
   function renderAll() {
     $("#ppRoster").innerHTML = rosterCardHtml();
     $("#ppJobPicker").innerHTML = jobPickerHtml();
-    $("#ppForm").innerHTML = state.designId ? buildJobPanel() : `<p class="col-empty">เลือก Job ด้านบนเพื่อดูใบสั่งเจาะลาย/ขยายลาย</p>`;
+    const formEl = $("#ppForm");
+    const focusInfo = captureFocus(formEl);
+    formEl.innerHTML = state.designId ? buildJobPanel() : `<p class="col-empty">เลือก Job ด้านบนเพื่อดูใบสั่งเจาะลาย/ขยายลาย</p>`;
+    restoreFocus(formEl, focusInfo);
   }
 
   let built = false;

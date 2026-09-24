@@ -1,5 +1,6 @@
 /* โค้ดสไตล์เฉพาะ ใบวางแผนงาน (Planning Worksheet) — ใช้ตัวแปรสี/คลาสร่วมกับ styles.css, calc.css */
-#planworkView .col-empty,#patternView .col-empty{padding:16px;text-align:center;color:var(--muted);font-size:11px}
+#planworkView .col-empty,#patternView .col-empty,#dyeingView .col-empty{padding:16px;text-align:center;color:var(--muted);font-size:11px}
+#dyeingView table.calc-table{min-width:0}
 .pw-card{margin-bottom:10px}
 .pw-card.wide{grid-column:1/-1}
 .pw-card .panel-heading{align-items:flex-start}

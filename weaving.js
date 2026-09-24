@@ -13,6 +13,49 @@
   const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = (n, d = 2) => { const x = typeof n === "number" ? n : parseFloat(String(n == null ? "" : n).replace(/,/g, "")); return (Number.isFinite(x) ? x : 0).toLocaleString("th-TH", { minimumFractionDigits: d, maximumFractionDigits: d }); };
   const uid = (p) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  // แก้ปัญหาช่องกรอกข้อมูล "เด้งออก" (เสียโฟกัส) ทุกครั้งที่พิมพ์ — เพราะ render ทับ innerHTML ทั้งก้อนทุกครั้ง
+  // ทำให้ input ที่กำลังโฟกัสอยู่ถูกทำลายทิ้งแล้วสร้างใหม่ ต้องจับตำแหน่งไว้ก่อน render แล้วคืนโฟกัส+ตำแหน่ง cursor กลับ
+  function captureFocus(root) {
+    const el = document.activeElement;
+    if (!el || !root.contains(el) || !el.name) return null;
+    let node = el, dataAttr = null;
+    while (node && node !== root) {
+      if (node.attributes) {
+        for (const attr of node.attributes) {
+          if (attr.name.startsWith("data-")) { dataAttr = { name: attr.name, value: attr.value }; break; }
+        }
+      }
+      if (dataAttr) break;
+      node = node.parentElement;
+    }
+    return {
+      name: el.name, dataAttr,
+      selStart: (typeof el.selectionStart === "number") ? el.selectionStart : null,
+      selEnd: (typeof el.selectionEnd === "number") ? el.selectionEnd : null,
+      scrollTop: root.scrollTop
+    };
+  }
+  function restoreFocus(root, info) {
+    if (!info) return;
+    let candidates = [...root.querySelectorAll(`[name="${CSS.escape(info.name)}"]`)];
+    if (info.dataAttr && candidates.length > 1) {
+      candidates = candidates.filter((c) => {
+        let n = c;
+        while (n && n !== root) {
+          if (n.getAttribute && n.getAttribute(info.dataAttr.name) === info.dataAttr.value) return true;
+          n = n.parentElement;
+        }
+        return false;
+      });
+    }
+    const el = candidates[0];
+    if (!el) return;
+    el.focus();
+    if (info.selStart != null && typeof el.setSelectionRange === "function") {
+      try { el.setSelectionRange(info.selStart, info.selEnd); } catch (e) { /* บาง input type ไม่รองรับ */ }
+    }
+    root.scrollTop = info.scrollTop;
+  }
 
   const KEY_SURPLUS = "siam-yarn-surplus";       // ledger: [{id,bucket,yarnCode,colorCode,tex,qty,kind,designId,note,date}]
   const KEY_ISSUES = "siam-weaving-issues";      // { [designId]: {pots:{[potKey]:{surplusDrawn,yarnReady,canvasReady}}, lines:{[i]:{weavers,grade}}, canvasReady, issuedAt, usage:[{potKey,label,orderedKg,actualKg,variance,date}] } }
@@ -216,7 +259,10 @@
 
   function renderAll() {
     $("#wiJobPicker").innerHTML = jobPickerHtml(state);
-    $("#wiForm").innerHTML = state.designId ? buildJobPanel() : `<p class="col-empty">เลือก Job ด้านบนเพื่อออกใบส่งแผนกทอ</p>`;
+    const formEl = $("#wiForm");
+    const focusInfo = captureFocus(formEl);
+    formEl.innerHTML = state.designId ? buildJobPanel() : `<p class="col-empty">เลือก Job ด้านบนเพื่อออกใบส่งแผนกทอ</p>`;
+    restoreFocus(formEl, focusInfo);
     $("#wiSurplus").innerHTML = surplusPanelHtml();
   }
 

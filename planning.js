@@ -24,11 +24,56 @@
   const uid = (p) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const readJson = (k, fb) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch (e) { return fb; } };
   const writeJson = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* บันทึกไม่ได้ก็ยังใช้ต่อได้ */ } };
+  // แก้ปัญหาช่องกรอกข้อมูล "เด้งออก" (เสียโฟกัส) ทุกครั้งที่พิมพ์ — เพราะ render() เดิมเขียนทับ innerHTML ทั้งก้อน
+  // ทำให้ input ที่กำลังโฟกัสอยู่ถูกทำลายทิ้งแล้วสร้างใหม่ เบราว์เซอร์เลยหลุดโฟกัส ต้องจับตำแหน่ง element ที่โฟกัสอยู่
+  // (ชื่อ field + data-* ของ ancestor ที่ใกล้ที่สุด เพื่อแยกกรณีมีหลายแถวใช้ name ซ้ำกัน เช่นตารางโซนสี) ไว้ก่อน
+  // render ใหม่ แล้วค่อยคืนโฟกัส + ตำแหน่ง cursor กลับไปที่ element ตัวใหม่ที่ตรงกันหลัง render เสร็จ
+  function captureFocus(root) {
+    const el = document.activeElement;
+    if (!el || !root.contains(el) || !el.name) return null;
+    let node = el, dataAttr = null;
+    while (node && node !== root) {
+      if (node.attributes) {
+        for (const attr of node.attributes) {
+          if (attr.name.startsWith("data-")) { dataAttr = { name: attr.name, value: attr.value }; break; }
+        }
+      }
+      if (dataAttr) break;
+      node = node.parentElement;
+    }
+    return {
+      name: el.name, dataAttr,
+      selStart: (typeof el.selectionStart === "number") ? el.selectionStart : null,
+      selEnd: (typeof el.selectionEnd === "number") ? el.selectionEnd : null,
+      scrollTop: root.scrollTop
+    };
+  }
+  function restoreFocus(root, info) {
+    if (!info) return;
+    let candidates = [...root.querySelectorAll(`[name="${CSS.escape(info.name)}"]`)];
+    if (info.dataAttr && candidates.length > 1) {
+      candidates = candidates.filter((c) => {
+        let n = c;
+        while (n && n !== root) {
+          if (n.getAttribute && n.getAttribute(info.dataAttr.name) === info.dataAttr.value) return true;
+          n = n.parentElement;
+        }
+        return false;
+      });
+    }
+    const el = candidates[0];
+    if (!el) return;
+    el.focus();
+    if (info.selStart != null && typeof el.setSelectionRange === "function") {
+      try { el.setSelectionRange(info.selStart, info.selEnd); } catch (e) { /* บาง input type (เช่น number) ไม่รองรับ setSelectionRange */ }
+    }
+    root.scrollTop = info.scrollTop;
+  }
 
   const KEY_PRESETS = "siam-quality-presets";
   const KEY_WORKERS = "siam-workforce";
   const KEY_PLANS = "siam-planning-worksheets";
-  const ANCHOR_DATE = new Date(2026, 8, 21); // จ. 21 ก.ย. 2026 — วันแรกของสัปดาห์ในตาราง Gantt (app.js: const days=[["จ.",21],...])
+  const ANCHOR_DATE = new Date(2026, 8, 21); // จ. 21 ก.ย. 2026 — วันแรกของสัปดาห์ในตาราง Gantt (ต้องตรงกับ GANTT_ANCHOR ใน app.js)
 
   /* ============================================================
      1) ชนิดไหม (Tex ยืนยันจากชื่อ/การถอดสูตรย้อนกลับ) — แก้ไขได้ในหน้าตั้งค่า
@@ -661,7 +706,12 @@
   }
 
   function renderJobPicker() { $("#pwJobPicker").innerHTML = jobPickerHtml(); }
-  function renderForm() { $("#pwForm").innerHTML = state.plan ? buildForm() : `<p class="col-empty">เลือก Job ด้านบนเพื่อเริ่มวางแผน</p>`; }
+  function renderForm() {
+    const container = $("#pwForm");
+    const focusInfo = captureFocus(container);
+    container.innerHTML = state.plan ? buildForm() : `<p class="col-empty">เลือก Job ด้านบนเพื่อเริ่มวางแผน</p>`;
+    restoreFocus(container, focusInfo);
+  }
   function renderAll() { renderJobPicker(); renderForm(); }
 
   function pickJob(id) {

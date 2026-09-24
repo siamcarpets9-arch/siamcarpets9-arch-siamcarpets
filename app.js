@@ -950,14 +950,30 @@ const storedDesigns = (() => {
 const designs = Array.isArray(storedDesigns) && storedDesigns.length ? storedDesigns : seedDesigns;
 const saveDesigns = () => localStorage.setItem("enterprise-design-requests", JSON.stringify(designs));
 
-const baseTasks = [
-  {designId:"DES-26031",id:"JOB-26031",name:"Seal Beach Collection",dept:"Production",start:0,end:1,color:"production",status:"done"},
-  {designId:"DES-26031",id:"JOB-26031",name:"Dye Plan · SB-04",dept:"Dyeing",start:1,end:2.5,color:"dyeing",status:"active"},
-  {designId:"DES-26031",id:"JOB-26031",name:"Weaving · SB-04",dept:"Weaving",start:2,end:5,color:"weaving",status:"active"}
-];
+// รายการคำขอทำแบบตัวอย่าง (demo) จากเวอร์ชันก่อนหน้า ก่อนเปลี่ยนมาใช้ข้อมูลจริงทั้งหมด — designs อ่านจาก
+// localStorage ของเบราว์เซอร์ก่อนเสมอถ้ามีอยู่แล้ว จึงต้องล้างทิ้งตอนเปิดแอปทุกครั้งเผื่อยังค้างอยู่ ไม่งั้นจะไปโผล่ปน
+// ในทะเบียนคำขอทำแบบ (DES-26031/26042/26057/26063 = Seal Beach/Luna Gradient/Harbor Hospitality/Northline Bespoke)
+// และในตาราง KPI แยกตาม Designer (K. MAY / N. PLOY / T. BEAM ที่ผูกกับดีไซน์ปลอมพวกนี้) ไปด้วย
+const KNOWN_FAKE_DESIGN_IDS = new Set(["DES-26031", "DES-26042", "DES-26057", "DES-26063"]);
+(() => {
+  let changed = false;
+  for (let i = designs.length - 1; i >= 0; i--) {
+    if (KNOWN_FAKE_DESIGN_IDS.has(String(designs[i].id))) { designs.splice(i, 1); changed = true; }
+  }
+  if (changed) saveDesigns();
+})();
 
-const days = [["จ.",21],["อ.",22],["พ.",23],["พฤ.",24],["ศ.",25],["ส.",26],["อา.",27]];
+// งานตัวอย่าง (demo) บน Master Plan Gantt เดิมผูกกับ DES-26031 (ดีไซน์ปลอม) ล้วน ๆ — ของจริงทั้งหมดถูกดันเข้ามาที่นี่
+// ตอนรันไทม์โดยฝ่ายขาย/แผนกวางแผน (ดู finishOpenJob และ planning.js) จึงเริ่มต้นเป็นอาเรย์ว่างได้เลย
+const baseTasks = [];
+
 const monthNames=["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+// จุดอ้างอิงของตาราง Master Plan Gantt — offset 0 = จ. 21 ก.ย. 2026 (ต้องตรงกับ ANCHOR_DATE ใน planning.js
+// เพราะ start/end ของงานจริงที่ดันเข้า baseTasks มาจาก PlanningEngine คิดเป็นจำนวนวันนับจากวันเดียวกันนี้)
+const GANTT_ANCHOR = new Date(2026, 8, 21, 0, 0, 0, 0);
+const WEEKDAY_ABBR_BY_DOW = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."]; // ตรงกับ Date#getDay() (0=อาทิตย์)
+function ganttOffsetToDate(off) { return new Date(GANTT_ANCHOR.getTime() + off * 86400000); }
+function ganttDateToOffset(date) { return Math.round((date - GANTT_ANCHOR) / 86400000); }
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 let offset = 0;
@@ -1024,7 +1040,7 @@ function inPeriod(dateValue, range){
 function setView(view){
   $$(".app-view").forEach((section)=>section.classList.toggle("active-view",section.id===`${view}View`||(view==="overview"&&section.id==="planningView"))); // หน้า Planning (Master Plan Gantt) เดิม ถูกย้ายมารวมแสดงต่อท้ายหน้า "ภาพรวมการผลิต" แล้ว ไม่มีแท็บแยกอีกต่อไป
   $$(".nav-link[data-view]").forEach((button)=>button.classList.toggle("active",button.dataset.view===view));
-  const flowView=({cost:"design",salesreport:"sales",shipping:"sales",calc:"design",colors:"design",planwork:"planning",pattern:"planning",weaveissue:"planning",weavefloor:"planning",finishing:"planning",qcdash:"planning"})[view]||view; // หน้าต้นทุนอยู่ในขั้น Design · รายงานขาย/ใบส่งอยู่ในขั้น Sales · ใบวางแผนงาน/เจาะลาย/ส่งแผนกทอ/แผนกทอ/ทากาวตกแต่ง/QC อยู่ในขั้น Planning
+  const flowView=({cost:"design",salesreport:"sales",shipping:"sales",calc:"design",colors:"design",planwork:"planning",dyeing:"planning",pattern:"planning",weaveissue:"planning",weavefloor:"planning",finishing:"planning",qcdash:"planning"})[view]||view; // หน้าต้นทุนอยู่ในขั้น Design · รายงานขาย/ใบส่งอยู่ในขั้น Sales · ใบวางแผนงาน/แผนกย้อม/เจาะลาย/ส่งแผนกทอ/แผนกทอ/ทากาวตกแต่ง/QC อยู่ในขั้น Planning
   $$(".workflow-step").forEach((step)=>{
     const order={design:1,sales:2,planning:3};
     step.classList.toggle("active",step.dataset.workflow===flowView);
@@ -1041,6 +1057,7 @@ function setView(view){
   if(view==="colors"&&typeof renderColors==="function") renderColors();
   if(view==="overview") renderPlanning();
   if(view==="planwork"&&typeof renderPlanWork==="function") renderPlanWork();
+  if(view==="dyeing"&&typeof renderDyeing==="function") renderDyeing();
   if(view==="pattern"&&typeof renderPattern==="function") renderPattern();
   if(view==="weaveissue"&&typeof renderWeaveIssue==="function") renderWeaveIssue();
   if(view==="weavefloor"&&typeof renderWeaveFloor==="function") renderWeaveFloor();
@@ -1229,8 +1246,26 @@ function renderPlanningKpiTable(kpi){
   el.innerHTML=`<table class="calc-table"><thead><tr><th>Design</th><th>M/O</th><th>โปรเจกต์</th><th>กำหนดตาม Plan</th><th>เลข INV</th><th>วันส่งจริง</th><th>สถานะ</th></tr></thead><tbody>${kpi.rows.map(r=>`<tr><td>${r.designId}</td><td>${r.moNo}</td><td>${r.project}</td><td>${r.committed||"-"}</td><td>${r.inv||"-"}</td><td>${r.shipped||"-"}</td><td>${statusTag(r.status)}</td></tr>`).join("")}</tbody></table>`;
 }
 
+// สร้างหัวตารางวันที่ (7 วัน นับจาก offset สัปดาห์ปัจจุบัน) จากวันที่จริง ไม่ใช่เลขวันที่ตายตัว
+// เดิมเอาเลข 21-27 บวก offset ตรง ๆ พอเลื่อนสัปดาห์ข้ามสิ้นเดือนจะได้เลขวันที่ที่ไม่มีจริง (31, 32, ...)
+// ทำให้หัวตารางช่วงท้าย ๆ ดูหายไป/ไม่ตรงกับแท่งงานที่แสดง จึงเปลี่ยนมาคำนวณจากวันที่จริงเสมอ
 function renderDates(){
-  $("#dateHeader").innerHTML=days.map(([label,date],index)=>`<div class="date-cell ${index===0&&$("#showToday").checked?"today":""}"><span>${label}</span><strong>${date+offset}</strong></div>`).join("");
+  const showToday=$("#showToday").checked;
+  const todayOffset=ganttDateToOffset(REPORT_DATE);
+  const cells=[];
+  for(let i=0;i<7;i++){
+    const dayOffset=offset+i;
+    const d=ganttOffsetToDate(dayOffset);
+    const isToday=showToday&&dayOffset===todayOffset;
+    const showMonth=d.getDate()===1||i===0; // ขึ้นเดือนใหม่ หรือ วันแรกที่มองเห็น ให้กำกับชื่อเดือนไว้ด้วย
+    cells.push(`<div class="date-cell ${isToday?"today":""}"><span>${WEEKDAY_ABBR_BY_DOW[d.getDay()]}</span><strong>${d.getDate()}${showMonth?` ${THAI_MONTH_ABBR[d.getMonth()]}`:""}</strong></div>`);
+  }
+  $("#dateHeader").innerHTML=cells.join("");
+  const rangeLabel=document.querySelector(".range-label");
+  if(rangeLabel){
+    const start=ganttOffsetToDate(offset),end=ganttOffsetToDate(offset+6);
+    rangeLabel.textContent=`${start.getDate()} ${THAI_MONTH_ABBR[start.getMonth()]} ${start.getFullYear()} – ${end.getDate()} ${THAI_MONTH_ABBR[end.getMonth()]} ${end.getFullYear()}`;
+  }
 }
 
 let lastGanttRows=[];
@@ -1244,9 +1279,15 @@ function renderGantt(){
     $("#barsArea").innerHTML="";
     return;
   }
+  // ตำแหน่ง/ความกว้างของแท่งงาน อ้างอิงกับสัปดาห์ที่กำลังแสดง (offset) ไม่ใช่วันแรกสุดตายตัว
+  // ไม่งั้นเลื่อนสัปดาห์ (‹ ›) แล้วแท่งงานจะไม่ขยับตามหัวตารางวันที่เลย
   $("#taskRows").innerHTML=rows.map((task,i)=>`<div class="task-row" data-task-idx="${i}" title="คลิกเพื่อดูรายละเอียด"><div><strong>${task.dept}</strong><small>${task.id} · ${task.name}</small></div></div>`).join("");
-  $("#barsArea").innerHTML=rows.map(task=>`<div class="bar-row"><div class="bar ${task.color}" style="left:${task.start/7*100}%;width:${Math.max((task.end-task.start)/7*100,9)}%">${task.name}</div></div>`).join("");
-  if($("#showToday").checked){const line=document.createElement("div");line.className="today-line";line.style.left="18%";$("#barsArea").append(line);}
+  $("#barsArea").innerHTML=rows.map(task=>`<div class="bar-row"><div class="bar ${task.color}" style="left:${(task.start-offset)/7*100}%;width:${Math.max((task.end-task.start)/7*100,9)}%">${task.name}</div></div>`).join("");
+  if($("#showToday").checked){
+    const todayOffset=ganttDateToOffset(REPORT_DATE);
+    const pos=(todayOffset-offset)/7*100;
+    if(pos>=0&&pos<=100){const line=document.createElement("div");line.className="today-line";line.style.left=`${pos}%`;$("#barsArea").append(line);}
+  }
 }
 
 // รายละเอียดงานเมื่อคลิกแถวในตาราง "รายการงาน" ของแท็บใบวางแผนงาน (เดิมกดแล้วไม่มีอะไรเกิดขึ้นเลย เพราะไม่เคยผูกปุ่มไว้)
