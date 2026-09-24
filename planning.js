@@ -276,64 +276,28 @@
   function loadPresets() { const p = readJson(KEY_PRESETS, null); return Array.isArray(p) && p.length ? p : (() => { const seeded = seedPresets(); writeJson(KEY_PRESETS, seeded); return seeded; })(); }
   function loadWorkers() { const w = readJson(KEY_WORKERS, null); return Array.isArray(w) && w.length ? w : (() => { writeJson(KEY_WORKERS, WORKERS_DEFAULT); return WORKERS_DEFAULT.slice(); })(); }
   function saveWorkers(list) { writeJson(KEY_WORKERS, list); }
-  function addSharedWorker(name) {
-    name = String(name || "").trim();
-    if (!name) return;
-    const list = loadWorkers();
-    if (list.some((w) => w.toLowerCase() === name.toLowerCase())) { toast(`มีชื่อ "${name}" อยู่แล้ว`); return; }
-    list.push(name);
-    saveWorkers(list);
-  }
-  function removeSharedWorker(idx) {
-    const list = loadWorkers();
-    list.splice(idx, 1);
-    saveWorkers(list);
-  }
-  function exportSharedWorkersExcel() {
-    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
-    const rows = [["แผนก", "ชื่อ-นามสกุล"], ...loadWorkers().map((w) => ["ทอ/ตกแต่ง", w])];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "พนักงานทอ-ตกแต่ง");
-    XLSX.writeFile(wb, "รายชื่อพนักงาน-ทอ-ตกแต่ง.xlsx");
-  }
-  const KEY_PATTERN_WORKERS_EXT = "siam-workforce-pattern"; // ทะเบียนเจาะลาย/ปั๊มผ้า — ไฟล์นำเข้าเดียวแยกลงได้ทั้ง 2 ทะเบียนไม่ว่าจะอัปโหลดจากหน้าไหน
-  async function importSharedWorkersExcel(file) {
-    if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
-    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-    const sharedList = loadWorkers();
-    const patternList = readJson(KEY_PATTERN_WORKERS_EXT, []);
-    let sharedAdded = 0, patternAdded = 0;
-    wb.SheetNames.forEach((sn) => {
-      XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "", raw: false }).forEach((row) => {
-        const dept = String(row[0] || "").trim();
-        const name = String(row[1] || "").trim();
-        if (!name || /ชื่อ.?นามสกุล|ตัวอย่าง/.test(name)) return;
-        const isShared = /ทอ|ตกแต่ง|แต่ง/.test(dept);
-        const isPattern = /เจาะลาย|ขยายลาย|ปั๊ม|ดีไซน์/.test(dept);
-        if (isShared || (!dept && !isPattern)) {
-          if (!sharedList.some((w) => w.toLowerCase() === name.toLowerCase())) { sharedList.push(name); sharedAdded++; }
-        }
-        if (isPattern) {
-          if (!patternList.some((w) => w.toLowerCase() === name.toLowerCase())) { patternList.push(name); patternAdded++; }
-        }
-      });
-    });
-    saveWorkers(sharedList);
-    writeJson(KEY_PATTERN_WORKERS_EXT, patternList);
-    toast(`นำเข้ารายชื่อพนักงานแล้ว — ทอ/ตกแต่ง ${sharedAdded} คน, เจาะลาย/ปั๊มผ้า ${patternAdded} คน`);
-  }
+  // หมายเหตุ: การเพิ่ม/ลบ/นำเข้า/ส่งออกรายชื่อพนักงาน จัดการที่แท็บ "แผนกทอ (จอทอรายวัน)" แล้ว (ใช้คีย์ localStorage ร่วมกัน — KEY_WORKERS)
   function loadPlans() { return readJson(KEY_PLANS, {}); }
   function savePlan(designId, plan) { const all = loadPlans(); all[designId] = plan; writeJson(KEY_PLANS, all); }
 
-  function blankZone(yarnCode) {
+  // สร้างโซนใหม่ 1 แถว — ให้ "AI" (ระบบ) เลือกคุณภาพ (preset) ที่ใกล้เคียงที่สุดให้อัตโนมัติ แทนที่จะบังคับกรอกพารามิเตอร์ทอเองทุกครั้ง
+  // like: โซนก่อนหน้า (ใช้เทคนิคทอ/ชนิดไหมเดียวกันต่อ) — ไม่ระบุ = เริ่มจากค่าเริ่มต้นมาตรฐาน (HWO 45, Cut to Side)
+  function blankZone(like, presets) {
+    const yarnCode = (like && like.yarnCode) || "HWO";
+    const weaveType = (like && like.weaveType) || "cutside";
+    const structure = weaveType === "loop" ? "loop" : "cut";
     const yt = YARN_TYPES_DEFAULT.find((y) => y.code === yarnCode) || YARN_TYPES_DEFAULT[0];
-    return { id: uid("z"), name: "โซนใหม่", colorCode: "", weaveType: "loop", byArea: false, pct: 0, area: 0, presetId: "", yarnCode: yt.code, S: 28, R: 12, FPH: 9, TPH: 11, N: 4, Tex: yt.tex };
+    const zone = { id: uid("z"), name: "", colorCode: "", weaveType, byArea: false, pct: 0, area: 0, presetId: "", yarnCode: yt.code, S: 28, R: 12, FPH: 9, TPH: 11, N: 4, Tex: yt.tex };
+    const list = presets || [];
+    const preset = list.find((p) => p.yarnCode === yt.code && p.structure === structure && p.quality === "45") || list.find((p) => p.yarnCode === yt.code && p.structure === structure);
+    if (preset) applyPresetToZone(zone, preset);
+    return zone;
   }
   function blankPlan(designId, moNo, totalAreaSqm) {
     return {
       designId, moNo: moNo || "", totalAreaSqm: totalAreaSqm || 0, areaSource: totalAreaSqm ? "auto" : "manual",
       patternPct: 50, weaveGradeOverride: "", punchMethodOverride: "", finishGradeOverride: "",
-      bufferPct: 10, zones: [blankZone("HWO")],
+      bufferPct: 10, zones: [blankZone(null, loadPresets())],
       hoursPerDay: 8, loomCount: 2, punchWorkers: 1, finishWorkers: 2, dyeDays: 3,
       weaveWorkers: [], punchWorkerNames: [], finishWorkerNames: [], dyeOrders: {}, savedAt: null
     };
@@ -351,7 +315,7 @@
     return { row, moNo, totalAreaSqm };
   }
 
-  const state = { designId: null, plan: null };
+  const state = { designId: null, plan: null, editGrades: false };
 
   function ensurePlan(designId) {
     const all = loadPlans();
@@ -384,27 +348,37 @@
     return `<option value="">— กำหนดพารามิเตอร์เอง —</option>${opts.map((p) => `<option value="${p.id}" ${zone.presetId === p.id ? "selected" : ""}>${esc(p.label)}${p.verified ? " ✓" : ""}</option>`).join("")}`;
   }
 
+  // สรุปพารามิเตอร์ทอแบบอ่านอย่างเดียว — แสดงแทนช่องกรอกเมื่อเลือกคุณภาพ (preset) แล้ว เพื่อไม่ให้ต้องเห็น/กรอกตัวเลขทางเทคนิคทุกแถว
+  function zoneParamsSummary(zone) {
+    const isLoop = zone.weaveType === "loop";
+    return isLoop
+      ? `S${esc(zone.S)} · R${esc(zone.R)} · PH${esc(zone.FPH)}มม. · Tex${esc(zone.Tex)} · N${esc(zone.N)}`
+      : `S${esc(zone.S)} · R${esc(zone.R)} · FPH${esc(zone.FPH)}/TPH${esc(zone.TPH)}มม. · Tex${esc(zone.Tex)} · N${esc(zone.N)}`;
+  }
+
   function zoneRowHtml(zone, idx, presets, computed) {
     const isLoop = zone.weaveType === "loop";
+    const custom = !zone.presetId;
     const w = computed ? computed.weightPerSqmKg : 0, a = computed ? computed.areaSqm : 0, kg = computed ? computed.baseKg : 0;
     return `<tr data-zone="${zone.id}">
       <td>${idx + 1}</td>
-      <td><input name="name" value="${esc(zone.name)}" class="pw-name"></td>
       <td><input name="colorCode" value="${esc(zone.colorCode)}" placeholder="เช่น 34B" class="pw-colorcode"></td>
       <td><select name="weaveType">${Object.entries(WEAVE_TYPE_LABEL).map(([k, v]) => `<option value="${k}" ${zone.weaveType === k ? "selected" : ""}>${v}</option>`).join("")}</select></td>
       <td class="pw-pctarea">
         <label class="pw-toggle"><input type="checkbox" name="byArea" ${zone.byArea ? "checked" : ""}> ตร.ม.</label>
         ${zone.byArea ? `<input name="area" value="${esc(zone.area)}" inputmode="decimal" class="pw-num">` : `<input name="pct" value="${esc(zone.pct)}" inputmode="decimal" class="pw-num">%`}
       </td>
-      <td><select name="yarnCode">${YARN_TYPES_DEFAULT.map((y) => `<option value="${y.code}" ${zone.yarnCode === y.code ? "selected" : ""}>${y.code}</option>`).join("")}</select></td>
-      <td><select name="presetId" class="pw-preset">${presetOptionsHtml(zone, presets)}</select></td>
-      <td class="pw-params">
-        <input name="S" value="${esc(zone.S)}" title="Stitch/10ซม." placeholder="S" class="pw-num tiny">
-        <input name="R" value="${esc(zone.R)}" title="Row/5ซม." placeholder="R" class="pw-num tiny">
-        <input name="FPH" value="${esc(zone.FPH)}" title="${isLoop ? "Pile Height (มม.)" : "Fin Pile Height หลังเจียร์ (มม.)"}" placeholder="${isLoop ? "PH" : "FPH"}" class="pw-num tiny">
-        ${isLoop ? "" : `<input name="TPH" value="${esc(zone.TPH)}" title="Tuft Pile Height ก่อนเจียร์ (มม.)" placeholder="TPH" class="pw-num tiny">`}
-        <input name="Tex" value="${esc(zone.Tex)}" title="Tex" placeholder="Tex" class="pw-num tiny">
-        <input name="N" value="${esc(zone.N)}" title="จำนวนเส้นไหม" placeholder="N" class="pw-num tiny">
+      <td class="pw-quality">
+        <select name="presetId" class="pw-preset">${presetOptionsHtml(zone, presets)}</select>
+        ${custom ? `<div class="pw-params">
+          <select name="yarnCode" title="ชนิดไหม">${YARN_TYPES_DEFAULT.map((y) => `<option value="${y.code}" ${zone.yarnCode === y.code ? "selected" : ""}>${y.code}</option>`).join("")}</select>
+          <input name="S" value="${esc(zone.S)}" title="Stitch/10ซม." placeholder="S" class="pw-num tiny">
+          <input name="R" value="${esc(zone.R)}" title="Row/5ซม." placeholder="R" class="pw-num tiny">
+          <input name="FPH" value="${esc(zone.FPH)}" title="${isLoop ? "Pile Height (มม.)" : "Fin Pile Height หลังเจียร์ (มม.)"}" placeholder="${isLoop ? "PH" : "FPH"}" class="pw-num tiny">
+          ${isLoop ? "" : `<input name="TPH" value="${esc(zone.TPH)}" title="Tuft Pile Height ก่อนเจียร์ (มม.)" placeholder="TPH" class="pw-num tiny">`}
+          <input name="Tex" value="${esc(zone.Tex)}" title="Tex" placeholder="Tex" class="pw-num tiny">
+          <input name="N" value="${esc(zone.N)}" title="จำนวนเส้นไหม" placeholder="N" class="pw-num tiny">
+        </div>` : `<small class="pw-params-readout">${zoneParamsSummary(zone)}</small>`}
       </td>
       <td class="num">${w ? fmt(w, 3) : "-"}</td>
       <td class="num">${a ? fmt(a, 3) : "-"}</td>
@@ -454,7 +428,7 @@
         <label><input type="checkbox" name="twist" ${order.twist ? "checked" : ""}> ต้องทวิสไหม</label>
         <label><input type="checkbox" name="ply" ${order.ply ? "checked" : ""}> ต้องควบไหม</label>
       </div>
-      ${isOut ? `<div class="pw-dye-grid">
+      ${isOut ? `<details class="pw-dye-cost-detail"><summary>รายละเอียดต้นทุนจ้างย้อม (ราคาไหม/ค่าจ้าง/surcharge/EPZ)</summary><div class="pw-dye-grid">
         <label class="pf tiny">ค่าจ้างย้อม (บาท/กก.)${inp("serviceFeePerKg", order.serviceFeePerKg, 'class="pw-num"')}</label>
         <label class="pf"><input type="checkbox" name="buyYarn" ${order.buyYarn ? "checked" : ""}> บริษัทซื้อไหมเอง</label>
         ${order.buyYarn ? field("ราคาไหม (บาท/กก.)", inp("yarnPricePerKg", order.yarnPricePerKg, 'class="pw-num"')) : ""}
@@ -465,7 +439,7 @@
         ${order.twist ? field("ค่าทวิส (บาท/กก.)", inp("twistCostPerKg", order.twistCostPerKg, 'class="pw-num"')) : ""}
         ${order.method === "hank" ? field("ค่า Hank (บาท/กก.)", inp("hankCostPerKg", order.hankCostPerKg, 'class="pw-num"')) : ""}
         ${field("ภาษี EPZ (%)", inp("epzPct", order.epzPct, 'class="pw-num"'))}
-      </div>` : ""}
+      </div></details>` : ""}
       <div class="pw-dye-grid">
         <label class="pf ${issueMismatch ? "warn-label" : ""}">วันที่เปิดใบสั่งย้อม<input type="date" name="issueDate" value="${esc(order.issueDate)}"></label>
         <label class="pf ${needMismatch ? "warn-label" : ""}">วันที่ต้องการไหม<input type="date" name="needDate" value="${esc(order.needDate)}"></label>
@@ -496,26 +470,22 @@
     const dyeOrderRows = syncDyeOrders(p, dye.pots, dyeSeg);
     const dyeOrderGrandTotal = dyeOrderRows.reduce((t, r) => t + (r.order.source === "outsource" ? dyeOrderCost(r.order, r.pot.netKg).total : 0), 0);
 
+    const showGradeEdit = Boolean(state.editGrades || p.weaveGradeOverride || p.punchMethodOverride || p.finishGradeOverride);
+
     return `
     <section class="department-panel pw-card">
-      <div class="panel-heading"><div><strong>1) ข้อมูลงาน</strong><small>ดึงจาก M/O ที่ฝ่ายขายเปิด — แก้พื้นที่ได้หากยังไม่ตรง</small></div></div>
+      <div class="panel-heading"><div><strong>1) ข้อมูลงาน + สเปคการทอ</strong><small>ดึงจาก M/O ที่ฝ่ายขายเปิด · กรอก % ลาย แล้วระบบแนะนำเกรดทอ/ตอกลาย/ตกแต่งให้อัตโนมัติ (AI ช่วยเลือกให้ ปรับเองได้)</small></div></div>
       <div class="pw-body">
         <div class="pw-row">
           ${res("Design", esc(p.designId))}${res("M/O", esc(p.moNo || "-"))}${res("โปรเจกต์", esc(info.project || "-"))}${res("ลูกค้า", esc(info.customer || "-"))}
           ${field("พื้นที่รวม (ตร.ม.)", inp("totalAreaSqm", p.totalAreaSqm, 'class="pw-num"'))}
-        </div>
-      </div>
-    </section>
-
-    <section class="department-panel pw-card">
-      <div class="panel-heading"><div><strong>2) กำหนด Spec การทอ (เกรดตาม % ลวดลาย)</strong><small>อ้างอิงตารางประสิทธิภาพ ทอ/ตอกลาย/ตกแต่ง ของฝ่ายผลิต — กรอก % พื้นที่มีลาย แล้วระบบแนะนำเกรดให้ทั้ง 3 แผนก (ปรับเองได้)</small></div></div>
-      <div class="pw-body">
-        <div class="pw-row">
           ${field("% พื้นที่มีลวดลาย (% ลาย)", inp("patternPct", p.patternPct, 'class="pw-num"'))}
+        </div>
+        ${showGradeEdit ? `<div class="pw-row">
           ${field("เกรดทอ (เว้นว่าง = อัตโนมัติ)", `<select name="weaveGradeOverride"><option value="">อัตโนมัติ</option>${WEAVE_GRADES.map((g) => `<option value="${g.grade}" ${p.weaveGradeOverride === g.grade ? "selected" : ""}>${g.grade}</option>`).join("")}</select>`)}
           ${field("วิธีตอกลาย (เกรด E เลือกได้)", `<select name="punchMethodOverride"><option value="">อัตโนมัติ</option>${PUNCH_GRADES.map((g) => `<option value="${g.grade}|${g.method}" ${p.punchMethodOverride === `${g.grade}|${g.method}` ? "selected" : ""}>${g.grade} (${g.method})</option>`).join("")}</select>`)}
           ${field("เกรดตกแต่ง (เว้นว่าง = อัตโนมัติ)", `<select name="finishGradeOverride"><option value="">อัตโนมัติ</option>${FINISH_GRADES.map((g) => `<option value="${g.grade}" ${p.finishGradeOverride === g.grade ? "selected" : ""}>${g.grade}</option>`).join("")}</select>`)}
-        </div>
+        </div>` : `<div class="pw-row"><button type="button" class="text-button" data-toggle-grade-edit>ปรับเกรดเอง</button></div>`}
         <div class="pw-res-row">
           ${gradeTagHtml("เกรดทอ", weaveGrade, weaveGrade ? `Max ${weaveGrade.maxColor} สี · ${weaveGrade.cutLoopSame ? "ทำ Cut+Loop ผืนเดียวกันได้" : "ห้าม Cut+Loop ผืนเดียวกัน"} · ก้าว ${weaveGrade.stitchDiff} · ${fmt(weaveGrade.rateSqmPerHr, 4)} ตร.ม./ชม./คน · ${weaveGrade.size}` : "")}
           ${gradeTagHtml("เกรดตอกลาย", punchGrade, punchGrade ? `${punchGrade.method} · ${fmt(punchGrade.rateSqmPerHr, 2)} ตร.ม./ชม./คน · ${punchGrade.note}` : "")}
@@ -525,12 +495,17 @@
     </section>
 
     <section class="department-panel pw-card wide">
-      <div class="panel-heading"><div><strong>3) คำนวณน้ำหนักไหมสั่งย้อม</strong><small>แบ่งพื้นที่ดีไซน์เป็นโซนตามเทคนิคทอ/สี · น้ำหนักคำนวณจากสูตร Stitch/Row/Pile Height/Tex/จำนวนเส้นไหม (อ้างอิงไฟล์ Tufting Spec. ของฝ่ายผลิต) · ใช้ค่า "ก่อนเจียร์" เสมอสำหรับ Cut/Tip Shear ตามกฎที่ยืนยันแล้ว</small></div>
-        <button type="button" class="action-button" data-add-zone>+ เพิ่มโซน</button>
+      <div class="panel-heading"><div><strong>2) คำนวณน้ำหนักไหมสั่งย้อม</strong><small>ระบุสี/สัดส่วน แล้วเลือก "คุณภาพ" ให้ AI คำนวณน้ำหนักไหมให้ (สูตร Stitch/Row/Pile Height/Tex/จำนวนเส้นไหม อ้างอิงไฟล์ Tufting Spec. ของฝ่ายผลิต) — เลือก "กำหนดพารามิเตอร์เอง" เฉพาะกรณีสเปคพิเศษเท่านั้น</small></div>
+        <button type="button" class="action-button" data-add-zone>+ เพิ่มโซนสี</button>
       </div>
       <div class="pw-body">
+        <div class="pw-row">
+          ${field("จำนวนสี", `<input id="pwAutoColorCount" type="number" min="1" max="20" value="${p.zones.length || 3}" class="pw-num tiny">`)}
+          <button type="button" class="action-button" data-auto-zones>AI สร้างแถวสีให้ (แบ่ง % เท่ากัน)</button>
+          <small class="muted">สร้างแถวใหม่ตามจำนวนสีที่ระบุ แบ่งเปอร์เซ็นต์เท่า ๆ กันให้อัตโนมัติ (แทนที่รายการเดิม) — ค่อยแก้รหัสสี/% เองภายหลัง</small>
+        </div>
         <div class="pw-zone-scroll"><table class="calc-table pw-zone-table">
-          <thead><tr><th>#</th><th>ชื่อโซน</th><th>รหัสสี</th><th>เทคนิคทอ</th><th>สัดส่วน</th><th>ไหม</th><th>คุณภาพ (Preset)</th><th>S / R / PH-หลัง / PH-ก่อน / Tex / N</th><th class="num">น้ำหนัก (กก./ตร.ม.)</th><th class="num">พื้นที่ (ตร.ม.)</th><th class="num">น้ำหนักไหม (กก.)</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>รหัสสี</th><th>เทคนิคทอ</th><th>สัดส่วน</th><th>คุณภาพ</th><th class="num">น้ำหนัก (กก./ตร.ม.)</th><th class="num">พื้นที่ (ตร.ม.)</th><th class="num">น้ำหนักไหม (กก.)</th><th></th></tr></thead>
           <tbody id="pwZoneBody">${dye.zones.map((z, i) => zoneRowHtml(z, i, presets, z)).join("")}</tbody>
         </table></div>
         <div class="pw-row">
@@ -547,7 +522,7 @@
     </section>
 
     <section class="department-panel pw-card">
-      <div class="panel-heading"><div><strong>4) กำลังคนและระยะเวลาผลิต</strong><small>วัน = พื้นที่ ÷ (อัตรา ตร.ม./ชม./คน ตามเกรด × ชม./วัน × จำนวนคน) — ต่อเนื่องจากแผนกก่อนหน้าเป็น Master Plan</small></div></div>
+      <div class="panel-heading"><div><strong>3) กำลังคนและระยะเวลาผลิต</strong><small>ระบบตั้งค่าเริ่มต้นให้แล้ว ปรับได้ตามจริง — วัน = พื้นที่ ÷ (อัตรา ตร.ม./ชม./คน ตามเกรด × ชม./วัน × จำนวนคน) ต่อเนื่องจากแผนกก่อนหน้าเป็น Master Plan</small></div></div>
       <div class="pw-body">
         <div class="pw-row">
           ${field("ชม.ทำงาน/วัน", inp("hoursPerDay", p.hoursPerDay, 'class="pw-num tiny"'))}
@@ -565,32 +540,22 @@
     </section>
 
     <section class="department-panel pw-card wide">
-      <div class="panel-heading"><div><strong>5) ใบสั่งย้อม (Dye Order)</strong><small>ต่อยอดจากหม้อย้อมในข้อ 3 · วันที่เปิดใบสั่ง/ต้องการไหมผูกกับกำหนดการ "สั่งย้อมไหม" ใน Master Plan (ข้อ 4) อัตโนมัติ แก้เองได้แต่จะเตือนถ้าไม่ตรง · อัตราค่าใช้จ่ายทุกช่องเริ่มที่ 0 — ยังไม่มีข้อมูลราคาจริง กรุณากรอกเอง</small></div></div>
+      <div class="panel-heading"><div><strong>4) ใบสั่งย้อม (Dye Order)</strong><small>ต่อยอดจากหม้อย้อมในข้อ 2 · วันที่เปิดใบสั่ง/ต้องการไหมผูกกับกำหนดการ "สั่งย้อมไหม" ใน Master Plan (ข้อ 3) อัตโนมัติ แก้เองได้แต่จะเตือนถ้าไม่ตรง</small></div></div>
       <div class="pw-body">
-        ${dyeOrderRows.length ? `<div class="pw-dye-grid-outer">${dyeOrderRows.map((r) => dyeOrderCardHtml(r.pot, r.order, dyeSeg)).join("")}</div>` : `<p class="col-empty">ยังไม่มีหม้อย้อม — เพิ่มโซนในข้อ 3 ก่อน</p>`}
+        ${dyeOrderRows.length ? `<div class="pw-dye-grid-outer">${dyeOrderRows.map((r) => dyeOrderCardHtml(r.pot, r.order, dyeSeg)).join("")}</div>` : `<p class="col-empty">ยังไม่มีหม้อย้อม — เพิ่มโซนในข้อ 2 ก่อน</p>`}
         ${dyeOrderRows.some((r) => r.order.source === "outsource") ? `<div class="pw-row"><span class="tag-total">รวมค่าใช้จ่ายจ้างย้อมภายนอกทั้งหมด ≈ ${fmt(dyeOrderGrandTotal, 0)} บาท</span></div>` : ""}
       </div>
     </section>
 
     <section class="department-panel pw-card">
-      <div class="panel-heading"><div><strong>6) ต้นทุนแรงงานโดยประมาณ</strong><small>สมมติฐาน: อัตราค่าแรงตามเกรด (800–1200 บาท) และค่าแต่ง/ทากาว (400 บาท) เป็น "บาท/ตร.ม." — โปรดยืนยันหน่วยจริงกับฝ่ายบัญชีก่อนใช้งานจริง</small></div></div>
+      <div class="panel-heading"><div><strong>5) ต้นทุนแรงงานโดยประมาณ</strong><small>สมมติฐาน: อัตราค่าแรงตามเกรด (800–1200 บาท) และค่าแต่ง/ทากาว (400 บาท) เป็น "บาท/ตร.ม." — โปรดยืนยันหน่วยจริงกับฝ่ายบัญชีก่อนใช้งานจริง</small></div></div>
       <div class="pw-body">
         <div class="pw-row">
           ${res("ค่าแรงทอ (โดยประมาณ)", `${fmt(cost.weaveWage, 0)} บาท`)}
           ${res("ค่าแรงทากาว/แต่ง (โดยประมาณ)", `${fmt(cost.finishWage, 0)} บาท`)}
           ${res("รวมค่าแรงโดยประมาณ", `${fmt(cost.total, 0)} บาท`, "main")}
         </div>
-        <details class="pw-workers" open><summary>รายชื่อพนักงานทอ/ตกแต่ง (${workers.length} คน) — เพิ่ม/ลบได้ที่นี่ มีผลกับทุก M/O (ใช้ร่วมกันทั้งแผนกทอและแผนกตกแต่ง)</summary>
-          <div class="pw-row" style="margin-top:8px">
-            ${field("ชื่อพนักงาน", `<input id="pwNewWorkerName" placeholder="พิมพ์ชื่อแล้วกดเพิ่มรายชื่อ">`)}
-            <button type="button" class="action-button primary" data-add-shared-worker>+ เพิ่มรายชื่อ</button>
-            <button type="button" class="action-button" data-export-shared-workers>ส่งออก Excel</button>
-            <label class="file-picker">นำเข้าจาก Excel<input type="file" id="pwWorkersImportFile" accept=".xlsx,.xls" data-import-shared-workers></label>
-          </div>
-          ${workers.length
-            ? `<div class="pw-worker-tags">${workers.map((w, i) => `<span>${esc(w)}<button type="button" class="pw-worker-x" data-remove-shared-worker="${i}" title="ลบรายชื่อนี้">×</button></span>`).join("")}</div>`
-            : `<p class="col-empty">ยังไม่มีรายชื่อพนักงาน — เพิ่มด้านบน</p>`}
-        </details>
+        <p class="col-empty" style="text-align:left;padding:8px 2px 0">พนักงานทอ/ตกแต่ง ${workers.length} คน — จัดการรายชื่อและเงินเดือนได้ที่แท็บ "แผนกทอ (จอทอรายวัน)" (ใช้รายชื่อร่วมกันทุก M/O)</p>
       </div>
     </section>
 
@@ -626,16 +591,19 @@
 
   function zoneById(id) { return state.plan.zones.find((z) => z.id === id); }
 
-  function applyPreset(zone, presetId) {
-    if (!presetId) { zone.presetId = ""; return; }
-    const preset = loadPresets().find((p) => p.id === presetId);
-    if (!preset) return;
-    zone.presetId = presetId;
+  function applyPresetToZone(zone, preset) {
+    zone.presetId = preset.id;
     zone.S = preset.S; zone.R = preset.R; zone.N = preset.N; zone.yarnCode = preset.yarnCode;
     const yt = YARN_TYPES_DEFAULT.find((y) => y.code === preset.yarnCode);
     zone.Tex = yt ? yt.tex : preset.Tex || zone.Tex;
     if (preset.structure === "loop") { zone.FPH = preset.PH; zone.TPH = ""; }
     else { zone.FPH = preset.FPH; zone.TPH = preset.TPH; }
+  }
+  function applyPreset(zone, presetId) {
+    if (!presetId) { zone.presetId = ""; return; }
+    const preset = loadPresets().find((p) => p.id === presetId);
+    if (!preset) return;
+    applyPresetToZone(zone, preset);
   }
 
   let built = false;
@@ -650,30 +618,40 @@
       const pick = e.target.closest("[data-pick]");
       if (pick) { pickJob(pick.dataset.pick); return; }
       const addZone = e.target.closest("[data-add-zone]");
-      if (addZone) { state.plan.zones.push(blankZone(state.plan.zones[0] ? state.plan.zones[0].yarnCode : "HWO")); renderForm(); return; }
+      if (addZone) {
+        const prev = state.plan.zones[state.plan.zones.length - 1] || null;
+        state.plan.zones.push(blankZone(prev, loadPresets()));
+        renderForm();
+        return;
+      }
       const delZone = e.target.closest("[data-del-zone]");
       if (delZone) { state.plan.zones = state.plan.zones.filter((z) => z.id !== delZone.dataset.delZone); renderForm(); return; }
       const save = e.target.closest("[data-save-plan]");
       if (save) { commitPlan(); return; }
-      const addW = e.target.closest("[data-add-shared-worker]");
-      if (addW) {
-        const input = $("#pwNewWorkerName");
-        const name = input ? input.value : "";
-        if (has(name)) { addSharedWorker(name); renderForm(); const again = $("#pwNewWorkerName"); if (again) again.focus(); }
-        return;
-      }
-      const rmW = e.target.closest("[data-remove-shared-worker]");
-      if (rmW) { removeSharedWorker(Number(rmW.dataset.removeSharedWorker)); renderForm(); return; }
-      const expW = e.target.closest("[data-export-shared-workers]");
-      if (expW) { exportSharedWorkersExcel(); return; }
-    });
-    root.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && e.target && e.target.id === "pwNewWorkerName") {
-        e.preventDefault();
-        addSharedWorker(e.target.value);
+      const toggleGrade = e.target.closest("[data-toggle-grade-edit]");
+      if (toggleGrade) { state.editGrades = true; renderForm(); return; }
+      const autoZones = e.target.closest("[data-auto-zones]");
+      if (autoZones) {
+        const input = $("#pwAutoColorCount");
+        let n = Math.round(Number(input ? input.value : 0));
+        if (!n || n < 1) n = 1;
+        if (n > 20) n = 20;
+        if (state.plan.zones.length && !confirm(`สร้างแถวสีใหม่ ${n} แถว จะแทนที่รายการสีเดิมทั้งหมด ต้องการดำเนินการต่อหรือไม่?`)) return;
+        const presets = loadPresets();
+        const template = state.plan.zones[0] || null;
+        const zones = [];
+        const base = Math.floor(1000 / n);
+        let used = 0;
+        for (let i = 0; i < n; i++) {
+          const z = blankZone(template, presets);
+          const pctThousandths = i === n - 1 ? 1000 - used : base;
+          used += pctThousandths;
+          z.pct = Math.round(pctThousandths) / 10;
+          zones.push(z);
+        }
+        state.plan.zones = zones;
         renderForm();
-        const again = $("#pwNewWorkerName");
-        if (again) again.focus();
+        return;
       }
     });
     root.addEventListener("input", (e) => {
@@ -710,11 +688,6 @@
       }
     });
     root.addEventListener("change", (e) => {
-      if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-import-shared-workers")) {
-        const file = e.target.files && e.target.files[0];
-        if (file) importSharedWorkersExcel(file).then(() => { renderForm(); e.target.value = ""; });
-        return;
-      }
       if (!state.plan) return;
       const zoneRow = e.target.closest("[data-zone]");
       if (zoneRow) {
