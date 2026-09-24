@@ -221,6 +221,31 @@
   }
 
   /* ============================================================
+     6.5) ส่งจ้างทอภายนอก (Outsource Weaving) — ทางเลือกแทนการทอในบริษัท
+     หมายเหตุ: อัตราค่าจ้างทอ/ค่ากรอ/ค่าควบ/ค่าขนส่ง ไม่มีข้อมูลต้นทางยืนยัน
+     ค่าเริ่มต้น = 0 ทุกช่อง ต้องกรอกอัตราจริงเองต่อผู้รับจ้าง (ระบบจะจำอัตราค่าจ้างทอล่าสุดต่อเกรดไว้แนะนำครั้งถัดไป)
+     ============================================================ */
+  function blankWeaveOutsource(weaveSeg) {
+    return {
+      enabled: false, vendor: "", ratePerSqm: 0,
+      hasWind: false, windCostPerKg: 0,
+      hasPly: false, plyCostPerKg: 0,
+      transportCost: 0,
+      sentDate: isoDate(offsetToDate(weaveSeg.start)), neededDate: isoDate(offsetToDate(weaveSeg.end)),
+      sentDateAuto: true, neededDateAuto: true,
+      receivedDate: ""
+    };
+  }
+  function weaveOutsourceCost(rec, totalAreaSqm, netKg) {
+    totalAreaSqm = num(totalAreaSqm); netKg = num(netKg);
+    const weaveCost = num(rec.ratePerSqm) * totalAreaSqm;
+    const windCost = rec.hasWind ? num(rec.windCostPerKg) * netKg : 0;
+    const plyCost = rec.hasPly ? num(rec.plyCostPerKg) * netKg : 0;
+    const transportCost = num(rec.transportCost);
+    return { weaveCost, windCost, plyCost, transportCost, total: weaveCost + windCost + plyCost + transportCost };
+  }
+
+  /* ============================================================
      7) ใบสั่งย้อม (Dye Order) — ต่อยอดจากหม้อย้อมในข้อ 4
      หมายเหตุ: อัตราค่าใช้จ่ายทั้งหมด (ราคาไหม/ค่าจ้างย้อม/ค่ากรอ-ทวิส-ควบ/ค่า hank/% surcharge/% EPZ)
      ไม่มีข้อมูลต้นทางยืนยัน — ค่าเริ่มต้น = 0 ทุกช่อง ต้องกรอกอัตราจริงเองต่อออเดอร์/ผู้รับจ้าง
@@ -264,6 +289,7 @@
     potKeyOf, potLabelOf, computeZone, computeDyePlan,
     deptDays, dateToOffset, offsetToDate, fmtThaiDate, computeSchedule, laborCost,
     DYE_METHODS, isoDate, isoToDate, blankDyeOrder, dyeOrderCost,
+    blankWeaveOutsource, weaveOutsourceCost,
     KEY_PRESETS, KEY_WORKERS, KEY_PLANS, readJson, writeJson
   };
 
@@ -279,6 +305,28 @@
   // หมายเหตุ: การเพิ่ม/ลบ/นำเข้า/ส่งออกรายชื่อพนักงาน จัดการที่แท็บ "แผนกทอ (จอทอรายวัน)" แล้ว (ใช้คีย์ localStorage ร่วมกัน — KEY_WORKERS)
   function loadPlans() { return readJson(KEY_PLANS, {}); }
   function savePlan(designId, plan) { const all = loadPlans(); all[designId] = plan; writeJson(KEY_PLANS, all); }
+
+  // จำอัตราค่าจ้างทอภายนอกล่าสุดต่อเกรด ไว้แนะนำอัตโนมัติให้ M/O ถัดไปที่เกรดเดียวกัน (ไม่บังคับ แก้ไขเองได้เสมอ)
+  const KEY_WEAVE_OUT_RATEBOOK = "siam-weave-outsource-ratebook";
+  function loadWeaveOutRateBook() { return readJson(KEY_WEAVE_OUT_RATEBOOK, {}); }
+  function saveWeaveOutRate(grade, ratePerSqm) {
+    if (!grade) return;
+    const book = loadWeaveOutRateBook();
+    book[grade] = num(ratePerSqm);
+    writeJson(KEY_WEAVE_OUT_RATEBOOK, book);
+  }
+  // สร้าง/อัปเดตข้อมูลจ้างทอภายนอกของแผน — วันที่ส่ง/วันที่ต้องการผูกกับกำหนดการ "ทอพรม" ใน Master Plan อัตโนมัติ (ถ้ายังไม่ถูกแก้เอง)
+  function syncWeaveOutsource(p, weaveSeg, grade) {
+    if (!p.weaveOutsource) p.weaveOutsource = blankWeaveOutsource(weaveSeg);
+    const rec = p.weaveOutsource;
+    if (rec.sentDateAuto !== false) rec.sentDate = isoDate(offsetToDate(weaveSeg.start));
+    if (rec.neededDateAuto !== false) rec.neededDate = isoDate(offsetToDate(weaveSeg.end));
+    if (rec.enabled && !num(rec.ratePerSqm) && grade) {
+      const suggested = loadWeaveOutRateBook()[grade];
+      if (suggested) rec.ratePerSqm = suggested;
+    }
+    return rec;
+  }
 
   // สร้างโซนใหม่ 1 แถว — ให้ "AI" (ระบบ) เลือกคุณภาพ (preset) ที่ใกล้เคียงที่สุดให้อัตโนมัติ แทนที่จะบังคับกรอกพารามิเตอร์ทอเองทุกครั้ง
   // like: โซนก่อนหน้า (ใช้เทคนิคทอ/ชนิดไหมเดียวกันต่อ) — ไม่ระบุ = เริ่มจากค่าเริ่มต้นมาตรฐาน (HWO 45, Cut to Side)
@@ -299,7 +347,7 @@
       patternPct: 50, weaveGradeOverride: "", punchMethodOverride: "", finishGradeOverride: "",
       bufferPct: 10, zones: [blankZone(null, loadPresets())],
       hoursPerDay: 8, loomCount: 2, punchWorkers: 1, finishWorkers: 2, dyeDays: 3,
-      weaveWorkers: [], punchWorkerNames: [], finishWorkerNames: [], dyeOrders: {}, savedAt: null
+      weaveWorkers: [], punchWorkerNames: [], finishWorkerNames: [], dyeOrders: {}, weaveOutsource: null, savedAt: null
     };
   }
 
@@ -319,7 +367,7 @@
 
   function ensurePlan(designId) {
     const all = loadPlans();
-    if (all[designId]) { if (!all[designId].dyeOrders) all[designId].dyeOrders = {}; return all[designId]; }
+    if (all[designId]) { if (!all[designId].dyeOrders) all[designId].dyeOrders = {}; if (all[designId].weaveOutsource === undefined) all[designId].weaveOutsource = null; return all[designId]; }
     const info = moInfoFor(designId);
     return blankPlan(designId, info.moNo, info.totalAreaSqm);
   }
@@ -467,8 +515,11 @@
     const info = designs.find((d) => d.id === p.designId) || {};
     const pctSum = p.zones.reduce((t, z) => t + (z.byArea ? (num(p.totalAreaSqm) ? num(z.area) / num(p.totalAreaSqm) * 100 : 0) : num(z.pct)), 0);
     const dyeSeg = sched.segs[1];
+    const weaveSeg = sched.segs[2];
     const dyeOrderRows = syncDyeOrders(p, dye.pots, dyeSeg);
     const dyeOrderGrandTotal = dyeOrderRows.reduce((t, r) => t + (r.order.source === "outsource" ? dyeOrderCost(r.order, r.pot.netKg).total : 0), 0);
+    const weaveOut = syncWeaveOutsource(p, weaveSeg, weaveGrade ? weaveGrade.grade : "");
+    const weaveOutCost = weaveOutsourceCost(weaveOut, p.totalAreaSqm, dye.totalNetKg);
 
     const showGradeEdit = Boolean(state.editGrades || p.weaveGradeOverride || p.punchMethodOverride || p.finishGradeOverride);
 
@@ -556,6 +607,36 @@
           ${res("รวมค่าแรงโดยประมาณ", `${fmt(cost.total, 0)} บาท`, "main")}
         </div>
         <p class="col-empty" style="text-align:left;padding:8px 2px 0">พนักงานทอ/ตกแต่ง ${workers.length} คน — จัดการรายชื่อและเงินเดือนได้ที่แท็บ "แผนกทอ (จอทอรายวัน)" (ใช้รายชื่อร่วมกันทุก M/O)</p>
+        ${weaveOut.enabled ? `<p class="col-empty" style="text-align:left;padding:4px 2px 0">* งานนี้ส่งจ้างทอภายนอก ไม่ได้ใช้ค่าแรงทอในบริษัทข้างบน — ดูค่าใช้จ่ายจริงในข้อ 6</p>` : ""}
+      </div>
+    </section>
+
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>6) ส่งจ้างทอภายนอก (ถ้ามี)</strong><small>เปิดใช้เมื่อไม่ได้ทอในบริษัท · วันที่ส่ง/วันที่ต้องการผูกกับกำหนดการ "ทอพรม" ในข้อ 3 อัตโนมัติ · ระบบจำอัตราค่าจ้างทอล่าสุดของแต่ละเกรดไว้แนะนำครั้งถัดไป</small></div></div>
+      <div class="pw-body" data-weave-out>
+        <div class="pw-row"><label class="pf"><input type="checkbox" name="woEnabled" ${weaveOut.enabled ? "checked" : ""}> ส่งจ้างทอภายนอก (ไม่ทอในบริษัท)</label></div>
+        ${weaveOut.enabled ? `
+        <div class="pw-dye-card">
+          <div class="pw-dye-grid">
+            ${field("บริษัทที่จ้างทอ", inp("vendor", weaveOut.vendor, 'inputmode="text"'))}
+            ${field(`ค่าจ้างทอ (บาท/ตร.ม.) — เกรด ${esc(weaveGrade ? weaveGrade.grade : "-")}`, inp("ratePerSqm", weaveOut.ratePerSqm, 'class="pw-num"'))}
+          </div>
+          <div class="pw-dye-flags">
+            <label><input type="checkbox" name="hasWind" ${weaveOut.hasWind ? "checked" : ""}> มีค่ากรอ</label>
+            <label><input type="checkbox" name="hasPly" ${weaveOut.hasPly ? "checked" : ""}> มีค่าควบ</label>
+          </div>
+          <div class="pw-dye-grid">
+            ${weaveOut.hasWind ? field("ค่ากรอ (บาท/กก.)", inp("windCostPerKg", weaveOut.windCostPerKg, 'class="pw-num"')) : ""}
+            ${weaveOut.hasPly ? field("ค่าควบ (บาท/กก.)", inp("plyCostPerKg", weaveOut.plyCostPerKg, 'class="pw-num"')) : ""}
+            ${field("ค่าขนส่ง (บาท)", inp("transportCost", weaveOut.transportCost, 'class="pw-num"'))}
+          </div>
+          <div class="pw-dye-grid">
+            <label class="pf">วันที่ส่งไปทอ<input type="date" name="sentDate" value="${esc(weaveOut.sentDate)}"></label>
+            <label class="pf">วันที่ต้องการ<input type="date" name="neededDate" value="${esc(weaveOut.neededDate)}"></label>
+            <label class="pf">วันที่รับจริง<input type="date" name="receivedDate" value="${esc(weaveOut.receivedDate)}"></label>
+          </div>
+          <div class="pw-dye-cost">รวมค่าใช้จ่ายจ้างทอภายนอก: <strong>${fmt(weaveOutCost.total, 0)} บาท</strong><small> (ค่าจ้างทอ ${fmt(weaveOutCost.weaveCost, 0)} + ค่ากรอ ${fmt(weaveOutCost.windCost, 0)} + ค่าควบ ${fmt(weaveOutCost.plyCost, 0)} + ค่าขนส่ง ${fmt(weaveOutCost.transportCost, 0)})</small></div>
+        </div>` : ""}
       </div>
     </section>
 
@@ -679,6 +760,25 @@
         renderForm();
         return;
       }
+      const woBlock = e.target.closest("[data-weave-out]");
+      if (woBlock) {
+        const rec = state.plan.weaveOutsource;
+        if (!rec) return;
+        const name = e.target.name;
+        if (!name) return;
+        if (e.target.type === "checkbox") {
+          if (name === "woEnabled") rec.enabled = e.target.checked;
+          else rec[name] = e.target.checked;
+        } else if (name === "sentDate") { rec.sentDate = e.target.value; rec.sentDateAuto = false; }
+        else if (name === "neededDate") { rec.neededDate = e.target.value; rec.neededDateAuto = false; }
+        else rec[name] = e.target.value;
+        if (name === "ratePerSqm") {
+          const grade = state.plan.weaveGradeOverride || (suggestGrade(WEAVE_GRADES, state.plan.patternPct) || {}).grade;
+          if (grade) saveWeaveOutRate(grade, e.target.value);
+        }
+        renderForm();
+        return;
+      }
       const name = e.target.name;
       if (!name) return;
       if (["totalAreaSqm", "patternPct", "bufferPct", "hoursPerDay", "loomCount", "punchWorkers", "finishWorkers", "dyeDays"].includes(name)) {
@@ -710,6 +810,9 @@
         renderForm();
         return;
       }
+      // หมายเหตุ: ช่องกรอกในบล็อก "จ้างทอภายนอก" (data-weave-out) ถูกจัดการทั้งหมดที่ event "input" ด้านบนแล้ว
+      // (รวม checkbox ด้วย อ่านค่าโดยตรงจาก e.target.checked เหมือนช่อง "byArea" ของโซนสี) เพื่อเลี่ยงปัญหา
+      // DOM ถูก re-render (renderForm) ก่อนที่ event "change" จะ bubble ขึ้นมาถึง root ได้ครบ
       const name = e.target.name;
       if (!name) return;
       if (["weaveGradeOverride", "punchMethodOverride", "finishGradeOverride"].includes(name)) { state.plan[name] = e.target.value; renderForm(); }

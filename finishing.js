@@ -354,6 +354,11 @@
     const gradeStr = WF().suggestedGradeFor(plan);
     const gradeObj = (PE().WEAVE_GRADES || []).find((g) => g.grade === (plan.weaveGradeOverride || gradeStr));
     const labor = PE().laborCost(num(plan.totalAreaSqm), gradeObj);
+    // ถ้าส่งจ้างทอภายนอก ใช้ค่าใช้จ่ายจ้างทอจริงแทนค่าแรงทอในบริษัท (ค่าแต่ง/ทากาวยังคงคำนวณตามสูตรเดิมเสมอ)
+    const isWeaveOutsourced = Boolean(plan.weaveOutsource && plan.weaveOutsource.enabled);
+    const weaveOutCost = isWeaveOutsourced ? PE().weaveOutsourceCost(plan.weaveOutsource, plan.totalAreaSqm, dye.totalNetKg).total : 0;
+    const weaveCostEffective = isWeaveOutsourced ? weaveOutCost : labor.weaveWage;
+    const laborEffectiveTotal = weaveCostEffective + labor.finishWage;
 
     const dfin = loadFinishAll()[designId] || { pieces: {} };
     let meshCost = 0, glueCost = 0, transportCost = 0, extraStaffCost = 0, extraCostTotal = 0;
@@ -368,10 +373,11 @@
     const isDomestic = doc && doc.market === "DOMESTIC";
     const dcost = designCostFor(designId);
     const designCost = dcost ? dcost.cost : 0;
-    const total = designCost + dyeCost + labor.total + meshCost + glueCost + (isDomestic ? transportCost + extraStaffCost : 0) + extraCostTotal;
+    const total = designCost + dyeCost + laborEffectiveTotal + meshCost + glueCost + (isDomestic ? transportCost + extraStaffCost : 0) + extraCostTotal;
     const sqm = num(plan.totalAreaSqm);
     return {
       designId, plan, doc, designCost, designer: dcost ? dcost.designer : "", dyeCost, dyeMissing, labor, meshCost, glueCost,
+      isWeaveOutsourced, weaveOutCost, laborEffectiveTotal,
       transportCost: isDomestic ? transportCost : 0, extraStaffCost: isDomestic ? extraStaffCost : 0,
       extraCostTotal, extraLines, total, sqm, costPerSqm: sqm > 0 ? total / sqm : 0,
       isDomestic, market: doc ? doc.market : null,
@@ -385,7 +391,7 @@
       <td>${c.market ? esc(c.market === "DOMESTIC" ? "ในประเทศ" : "ต่างประเทศ") : "-"}</td>
       <td class="num">${c.designCost ? fmt(c.designCost, 2) : `<span class="muted">-</span>`}${c.designer ? `<br><small>${esc(c.designer)}</small>` : ""}</td>
       <td class="num">${fmt(c.dyeCost, 2)}${c.dyeMissing ? `<br><small class="pw-dye-warn">${c.dyeMissing} หม้อยังไม่มีใบสั่งย้อม</small>` : ""}</td>
-      <td class="num">${fmt(c.labor.total, 2)}</td>
+      <td class="num">${fmt(c.laborEffectiveTotal, 2)}${c.isWeaveOutsourced ? `<br><small class="pw-dye-warn">จ้างทอนอก ${fmt(c.weaveOutCost, 0)}</small>` : ""}</td>
       <td class="num">${fmt(c.meshCost + c.glueCost, 2)}</td>
       <td class="num">${fmt(c.transportCost + c.extraStaffCost, 2)}</td>
       <td class="num">${fmt(c.extraCostTotal, 2)}</td>

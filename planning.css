@@ -77,6 +77,9 @@
 .pw-dye-cost{font-size:10px;border-top:1px dashed var(--line);padding-top:7px}
 .pw-dye-cost small{display:block;color:var(--muted);font-size:9px;margin-top:2px}
 .pw-dye-cost.muted{color:var(--muted)}
+.pw-dye-cost-detail{font-size:9px;color:var(--muted)}
+.pw-dye-cost-detail summary{cursor:pointer;font-weight:700;padding:2px 0}
+.pw-dye-cost-detail .pw-dye-grid{margin-top:6px}
 
 /* ส่งแผนกทอ / Surplus / KPI */
 .pw-toggle-lg{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:900;color:var(--ink)}
