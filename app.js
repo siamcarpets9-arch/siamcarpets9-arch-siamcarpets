@@ -1038,7 +1038,7 @@ function inPeriod(dateValue, range){
 }
 
 function setView(view){
-  $$(".app-view").forEach((section)=>section.classList.toggle("active-view",section.id===`${view}View`||(view==="overview"&&section.id==="planningView"))); // หน้า Planning (Master Plan Gantt) เดิม ถูกย้ายมารวมแสดงต่อท้ายหน้า "ภาพรวมการผลิต" แล้ว ไม่มีแท็บแยกอีกต่อไป
+  $$(".app-view").forEach((section)=>section.classList.toggle("active-view",section.id===`${view}View`));
   $$(".nav-link[data-view]").forEach((button)=>button.classList.toggle("active",button.dataset.view===view));
   const flowView=({cost:"design",salesreport:"sales",shipping:"sales",calc:"design",colors:"design",planwork:"planning",dyeing:"planning",pattern:"planning",weaveissue:"planning",weavefloor:"planning",finishing:"planning",qcdash:"planning",store:"planning"})[view]||view; // หน้าต้นทุนอยู่ในขั้น Design · รายงานขาย/ใบส่งอยู่ในขั้น Sales · ใบวางแผนงาน/แผนกย้อม/เจาะลาย/ส่งแผนกทอ/แผนกทอ/ทากาวตกแต่ง/QC/สโตร์ อยู่ในขั้น Planning
   $$(".workflow-step").forEach((step)=>{
@@ -1055,7 +1055,6 @@ function setView(view){
   if(view==="shipping"&&typeof renderShipping==="function") renderShipping();
   if(view==="calc"&&typeof renderCalc==="function") renderCalc();
   if(view==="colors"&&typeof renderColors==="function") renderColors();
-  if(view==="overview") renderPlanning();
   if(view==="planwork"&&typeof renderPlanWork==="function") renderPlanWork();
   if(view==="dyeing"&&typeof renderDyeing==="function") renderDyeing();
   if(view==="pattern"&&typeof renderPattern==="function") renderPattern();
@@ -1216,22 +1215,8 @@ function finishOpenJob(id,moNo){
   renderSales();
 }
 
-function renderPlanning(){
-  const kpi=typeof WeavingEngine!=="undefined"&&WeavingEngine.planningKpi?WeavingEngine.planningKpi():null;
-  summaryCards("#summaryCards",[
-    ["Job จากฝ่ายขาย",designs.filter(x=>x.job==="OPENED").length,"Sales opened"],
-    ["กำลังวางแผน",baseTasks.length,"Scheduled operations"],
-    ["M/O รับเข้า (Planning)",kpi?kpi.intake:0,"บันทึกแผนแล้ว"],
-    ["ช่วงแผน","21–27 ก.ย.","Current horizon"],
-    ["งานเสร็จแล้ว",baseTasks.filter(x=>x.status==="done").length,"Completed operations"],
-    ["KPI ส่งตรงตามกำหนด",kpi&&kpi.passRate!=null?`${kpi.passRate.toFixed(0)}%`:"ไม่มีข้อมูล",kpi?`ผ่าน ${kpi.onTime} · ไม่ผ่าน ${kpi.late} · รอส่ง ${kpi.pending}`:"รอข้อมูลวันส่งจริงจากฝ่ายขาย"]
-  ]);
-  renderDates();
-  renderGantt();
-  $("#unallocatedCount").textContent=`${designs.filter(x=>x.job==="OPENED"&&!baseTasks.some(t=>t.designId===x.id)).length} รายการ`;
-  renderPlanningKpiTable(kpi);
-  renderPlanningYarnRequests();
-}
+// คำขอไหมเพิ่มจากแผนกทอ (รอออกใบสั่งย้อม) — เดิมแสดงอยู่ท้ายหน้า Master Plan Gantt (เลิกใช้แล้ว)
+// ย้ายมาแสดงที่ท้ายหน้า "ภาพรวมการผลิต" แทน เรียกจาก overview.js หลัง render ตารางหลักเสร็จทุกครั้ง
 function renderPlanningYarnRequests(){
   const el=$("#planningYarnRequests");
   if(!el) return;
@@ -1239,100 +1224,11 @@ function renderPlanningYarnRequests(){
   if(!reqs.length){ el.innerHTML=`<p class="col-empty">ยังไม่มีคำขอไหมเพิ่มจากแผนกทอที่รอดำเนินการ</p>`; return; }
   el.innerHTML=`<table class="calc-table"><thead><tr><th>Design/M-O</th><th>หม้อย้อม/สี</th><th class="num">ขอเพิ่ม (กก.)</th><th>ต้องการภายใน</th><th>เหตุผล</th><th>ขอเมื่อ</th></tr></thead><tbody>${reqs.map(r=>{const plan=WeaveFloorEngine.planFor(r.designId);return `<tr><td>${plan?(plan.moNo||r.designId):r.designId}</td><td>${r.label}</td><td class="num">${(+r.requestedKg||0).toFixed(3)}</td><td>${r.neededDate||"-"}</td><td>${r.reason||"-"}</td><td>${new Date(r.requestedAt).toLocaleDateString("th-TH")}</td></tr>`;}).join("")}</tbody></table><p style="color:var(--muted);font-size:10px;margin:6px 2px 0">ไปออกใบสั่งย้อมเพิ่มในหน้า "ใบวางแผนงาน" ของ M/O นั้น แล้วกดยืนยันผู้อนุมัติที่แท็บ "สรุป/ส่งออก/แจ้งเตือน" ในหน้าแผนกทอ</p>`;
 }
-function renderPlanningKpiTable(kpi){
-  const el=$("#planningKpiTable");
-  if(!el) return;
-  if(!kpi||!kpi.rows.length){ el.innerHTML=`<p class="col-empty">ยังไม่มี M/O ที่ Planning บันทึกแผน</p>`; return; }
-  const statusTag=(s)=>s==="onTime"?tag("ส่งตรงตามกำหนด",""):s==="late"?tag("ส่งล่าช้า","blocked"):tag("รอส่ง/รอ INV","review");
-  el.innerHTML=`<table class="calc-table"><thead><tr><th>Design</th><th>M/O</th><th>โปรเจกต์</th><th>กำหนดตาม Plan</th><th>เลข INV</th><th>วันส่งจริง</th><th>สถานะ</th></tr></thead><tbody>${kpi.rows.map(r=>`<tr><td>${r.designId}</td><td>${r.moNo}</td><td>${r.project}</td><td>${r.committed||"-"}</td><td>${r.inv||"-"}</td><td>${r.shipped||"-"}</td><td>${statusTag(r.status)}</td></tr>`).join("")}</tbody></table>`;
-}
-
-// สร้างหัวตารางวันที่ (7 วัน นับจาก offset สัปดาห์ปัจจุบัน) จากวันที่จริง ไม่ใช่เลขวันที่ตายตัว
-// เดิมเอาเลข 21-27 บวก offset ตรง ๆ พอเลื่อนสัปดาห์ข้ามสิ้นเดือนจะได้เลขวันที่ที่ไม่มีจริง (31, 32, ...)
-// ทำให้หัวตารางช่วงท้าย ๆ ดูหายไป/ไม่ตรงกับแท่งงานที่แสดง จึงเปลี่ยนมาคำนวณจากวันที่จริงเสมอ
-function renderDates(){
-  const showToday=$("#showToday").checked;
-  const todayOffset=ganttDateToOffset(REPORT_DATE);
-  const cells=[];
-  for(let i=0;i<7;i++){
-    const dayOffset=offset+i;
-    const d=ganttOffsetToDate(dayOffset);
-    const isToday=showToday&&dayOffset===todayOffset;
-    const showMonth=d.getDate()===1||i===0; // ขึ้นเดือนใหม่ หรือ วันแรกที่มองเห็น ให้กำกับชื่อเดือนไว้ด้วย
-    cells.push(`<div class="date-cell ${isToday?"today":""}"><span>${WEEKDAY_ABBR_BY_DOW[d.getDay()]}</span><strong>${d.getDate()}${showMonth?` ${THAI_MONTH_ABBR[d.getMonth()]}`:""}</strong></div>`);
-  }
-  $("#dateHeader").innerHTML=cells.join("");
-  const rangeLabel=document.querySelector(".range-label");
-  if(rangeLabel){
-    const start=ganttOffsetToDate(offset),end=ganttOffsetToDate(offset+6);
-    rangeLabel.textContent=`${start.getDate()} ${THAI_MONTH_ABBR[start.getMonth()]} ${start.getFullYear()} – ${end.getDate()} ${THAI_MONTH_ABBR[end.getMonth()]} ${end.getFullYear()}`;
-  }
-}
-
-let lastGanttRows=[];
-function renderGantt(){
-  const query=$("#searchInput").value.trim().toLowerCase();
-  const rows=baseTasks.filter((task)=>(!$("#hideDone").checked||task.status!=="done")&&(!query||`${task.id} ${task.name} ${task.dept}`.toLowerCase().includes(query)));
-  lastGanttRows=rows;
-  $("#resultCount").textContent=`${rows.length} งาน`;
-  if(!rows.length){
-    $("#taskRows").innerHTML='<div class="empty-gantt">ยังไม่มี Job ที่ผ่าน Sales Gate</div>';
-    $("#barsArea").innerHTML="";
-    return;
-  }
-  // ตำแหน่ง/ความกว้างของแท่งงาน อ้างอิงกับสัปดาห์ที่กำลังแสดง (offset) ไม่ใช่วันแรกสุดตายตัว
-  // ไม่งั้นเลื่อนสัปดาห์ (‹ ›) แล้วแท่งงานจะไม่ขยับตามหัวตารางวันที่เลย
-  $("#taskRows").innerHTML=rows.map((task,i)=>`<div class="task-row" data-task-idx="${i}" title="คลิกเพื่อดูรายละเอียด"><div><strong>${task.dept}</strong><small>${task.id} · ${task.name}</small></div></div>`).join("");
-  $("#barsArea").innerHTML=rows.map(task=>`<div class="bar-row"><div class="bar ${task.color}" style="left:${(task.start-offset)/7*100}%;width:${Math.max((task.end-task.start)/7*100,9)}%">${task.name}</div></div>`).join("");
-  if($("#showToday").checked){
-    const todayOffset=ganttDateToOffset(REPORT_DATE);
-    const pos=(todayOffset-offset)/7*100;
-    if(pos>=0&&pos<=100){const line=document.createElement("div");line.className="today-line";line.style.left=`${pos}%`;$("#barsArea").append(line);}
-  }
-}
-
-// รายละเอียดงานเมื่อคลิกแถวในตาราง "รายการงาน" ของแท็บใบวางแผนงาน (เดิมกดแล้วไม่มีอะไรเกิดขึ้นเลย เพราะไม่เคยผูกปุ่มไว้)
-function openJobDetailModal(task){
-  const row=designs.find((d)=>d.id===task.designId);
-  const doc=(typeof SalesEngine!=="undefined"&&SalesEngine.getDocs)?SalesEngine.getDocs().find((x)=>x.designId===task.designId):null;
-  const box=document.createElement("div");
-  box.className="job-detail-modal";
-  box.innerHTML=`<div class="job-detail-card">
-    <div class="job-detail-head"><strong>${tag(task.dept)} ${task.id}</strong><button type="button" class="text-button" data-close-job-detail>ปิด ✕</button></div>
-    <div class="job-detail-body">
-      <div class="pr"><small>งาน</small><strong>${task.name}</strong></div>
-      ${row?`<div class="pr"><small>ลูกค้า</small><strong>${row.customer||"-"}</strong></div>
-      <div class="pr"><small>Project</small><strong>${row.project||"-"}</strong></div>
-      <div class="pr"><small>กำหนดส่ง</small><strong>${row.due||"-"}</strong></div>`:`<div class="pr"><small>หมายเหตุ</small><strong>ไม่พบข้อมูล Design เชื่อมโยง (${task.designId})</strong></div>`}
-      ${doc?`<div class="pr"><small>เลขที่ M/O,S/O</small><strong>${doc.no||"-"}</strong></div>`:""}
-      <div class="pr"><small>สถานะ</small><strong>${task.status==="done"?"เสร็จแล้ว":"กำลังดำเนินการ"}</strong></div>
-    </div>
-    ${row?`<div class="job-detail-actions"><button type="button" class="action-button primary" data-goto-design="1">ไปที่หน้า Design</button></div>`:""}
-  </div>`;
-  document.body.appendChild(box);
-  box.addEventListener("click",(e)=>{
-    if(e.target===box||e.target.closest("[data-close-job-detail]")){box.remove();return;}
-    if(e.target.closest("[data-goto-design]")){box.remove();if(typeof setView==="function")setView("design");}
-  });
-}
-document.addEventListener("keydown",(e)=>{if(e.key==="Escape"){const m=document.querySelector(".job-detail-modal");if(m)m.remove();}});
-$("#taskRows") && $("#taskRows").addEventListener("click",(e)=>{
-  const rowEl=e.target.closest(".task-row");
-  if(!rowEl)return;
-  const task=lastGanttRows[Number(rowEl.dataset.taskIdx)];
-  if(task)openJobDetailModal(task);
-});
 
 $$(".nav-link[data-view]").forEach((button)=>button.addEventListener("click",()=>setView(button.dataset.view)));
 $("#designSearch").addEventListener("input",renderDesign);
 $("#salesSearch").addEventListener("input",renderSales);
-$("#searchInput").addEventListener("input",renderGantt);
-$("#hideDone").addEventListener("change",renderGantt);
-$("#showToday").addEventListener("change",()=>{renderDates();renderGantt();});
-$("#refreshButton").addEventListener("click",()=>{offset=0;renderPlanning();});
 $("#refreshSalesButton").addEventListener("click",renderSales);
-$("#prevWeek").addEventListener("click",()=>{offset-=7;renderDates();renderGantt();});
-$("#nextWeek").addEventListener("click",()=>{offset+=7;renderDates();renderGantt();});
 $("#addDesignButton").addEventListener("click",()=>{$("#designFormPanel").hidden=false;$("#designFormPanel").scrollIntoView({behavior:"smooth",block:"center"});});
 $("#closeDesignForm").addEventListener("click",()=>$("#designFormPanel").hidden=true);
 $("#designForm").addEventListener("submit",(event)=>{

@@ -104,6 +104,20 @@
     return doc.lines.reduce((t, l) => t + num(l.sqm), 0);
   }
 
+  // "กำหนดส่ง" (d.due) เก็บเป็นข้อความไทยที่แสดงผลแล้ว (เช่น "11 ก.ย. 2026") ไม่ใช่ ISO — ต้องแปลงกลับเป็น Date
+  // เพื่อใช้จัดกลุ่มตามเดือน/สัปดาห์ในมุมมองรายเดือน (งานส่วนใหญ่นำเข้าจาก Excel ไม่มีช่อง dueDate แบบ ISO ติดมาด้วย)
+  const THAI_MONTH_ABBR_LOCAL = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  function parseThaiDueDate(raw) {
+    const s = String(raw || "").trim();
+    if (!s || s === "-") return null;
+    const m = s.match(/^(\d{1,2})\s+(\S+)\s+(\d{4})/);
+    if (!m) return null;
+    const mi = THAI_MONTH_ABBR_LOCAL.indexOf(m[2]);
+    if (mi < 0) return null;
+    const d = new Date(Number(m[3]), mi, Number(m[1]));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
   /* ---------- สรุปการผลิตประจำวัน สำหรับหัวหน้าภาพรวม ----------
      ตร.ม.กำลังทอ/รอทอ: คำนวณสดจากสถานะปัจจุบันของทุกงาน (statusOf)
      สี ย้อม/ทอ/ตกแต่ง/ขยายลาย ต่อวัน: อ้างอิงเวลาบันทึกจริงของแต่ละแผนก (readyAt, WeaveFloorEngine.daySummary, QC log, requisitionAt) */
@@ -175,7 +189,7 @@
 
     /* --- เจาะลาย/ขยายลาย → ปั๊มผ้า: requisitionIssued = เบิกผ้าใบเริ่มงานแล้ว, canvasReady (ที่หน้าส่งแผนกทอ) = ปั๊มผ้าเสร็จพร้อมส่งทอ --- */
     if (!patternRec || !patternRec.requisitionIssued) {
-      return { dept: "pattern", state: "waiting", stateLabel: "คิวทำแบบ/รอเบิกผ้าใบ", updatedAt: plan.savedAt, source: "live" };
+      return { dept: "pattern", state: "waiting", stateLabel: "รอปั๊ม (คิวเบิกผ้าใบ)", updatedAt: plan.savedAt, source: "live" };
     }
     if (!issueRec || !issueRec.canvasReady) {
       return { dept: "pattern", state: "active", stateLabel: "กำลังปั๊มผ้า", updatedAt: patternRec.requisitionAt, source: "live" };
@@ -219,7 +233,7 @@
       const active = loomsWorking.length > 0;
       return {
         dept: "weaving", state: active ? "active" : "waiting",
-        stateLabel: active ? `กำลังทอจอ ${loomsWorking.join(", ")}` : "รอคิวทอ",
+        stateLabel: active ? `กำลังทอจอ ${loomsWorking.join(", ")}` : "รอทอ",
         updatedAt: issueRec.issuedAt, source: "live"
       };
     }
@@ -261,7 +275,7 @@
   /* ---------- 2) สถานะจากข้อมูลนำเข้า (QC Check Sheet, 22 ก.ย. 2026) ----------
      ข้อมูลนำเข้ามีแค่ "อยู่แผนกไหน" (CurrentStage) ไม่มีรายละเอียดว่ากำลังลงมือทำอยู่จริงหรือยัง
      จึงไม่เดาว่า "กำลังดำเนินการ" — ให้ขึ้นเป็น "รอ" ของแผนกนั้นเสมอ จนกว่าจะมีการกรอกงานจริงในระบบนี้ (ดู liveStatus) */
-  const IMPORT_WAIT_LABEL = { planning: "รอวางแผน", pattern: "รอเจาะลาย/ปั๊มผ้า", dyeing: "รอย้อมไหม", weaveissue: "รอส่งแผนกทอ", weaving: "รอทอ", finishing: "รอตกแต่ง/QC" };
+  const IMPORT_WAIT_LABEL = { planning: "รอวางแผน", pattern: "รอปั๊ม", dyeing: "รอย้อมไหม", weaveissue: "รอส่งแผนกทอ", weaving: "รอทอ", finishing: "รอตกแต่ง/QC" };
   const IMPORT_SOURCES = new Set(["QC Check Sheet", "MASTER PLAN 17-9-26"]);
   function importStatus(d) {
     if (IMPORT_SOURCES.has(d.importSource)) {
@@ -299,6 +313,57 @@
     return `<span class="ovw-state ovw-state-${cls}">${esc(label)}</span>`;
   }
 
+  function rowHtml({ d, st, type }) {
+    const meta = DEPTS[st.dept] || DEPTS.planning;
+    const photo = designPhoto(d.id);
+    return `<tr style="border-left:3px solid ${meta.color}">
+      <td>${photo ? `<img class="ovw-thumb" src="${photo}" alt="">` : `<span class="ovw-thumb ovw-thumb-empty">-</span>`}</td>
+      <td><span class="ovw-type ovw-type-${type}">${type}</span></td>
+      <td><strong>${esc(d.id)}</strong><small>${esc(d.market === "DOMESTIC" ? "ในประเทศ" : d.market === "FOREIGN" ? "ต่างประเทศ" : "")}</small></td>
+      <td>${esc(d.customer || "-")}</td>
+      <td>${esc(d.project || "-")}</td>
+      <td>${esc(d.due || "-")}${d.planNote ? `<br><small class="ovw-plannote">⚠ ${esc(d.planNote)}</small>` : ""}</td>
+      <td>${badge(st.dept, st.state)}<br><small class="ovw-dept-label">${esc(meta.label)}</small></td>
+      <td>${d.weaveLocation ? `<span class="ovw-weaveloc ${d.weaveLocation === "SIAM" ? "ovw-weaveloc-in" : "ovw-weaveloc-out"}">${esc(d.weaveLocation === "SIAM" ? "ทอเอง" : d.weaveLocation)}</span>` : "-"}</td>
+      <td>${stateTag(st.state, st.stateLabel)}${st.source === "import" ? `<small class="ovw-src">${d.importSource === "MASTER PLAN 17-9-26" ? "ตาม MASTER PLAN 17 ก.ย." : "ตามข้อมูลนำเข้า 22 ก.ย."}</small>` : st.source === "live" ? '<small class="ovw-src ovw-src-live">อัปเดตจากระบบนี้</small>' : ""}</td>
+      <td><button type="button" class="action-button ovw-goto" data-view="${meta.view}">ไปที่หน้า ${esc(meta.short)}</button></td>
+    </tr>`;
+  }
+
+  // จัดกลุ่มสัปดาห์ปฏิทิน (จันทร์–อาทิตย์) ที่คาบเกี่ยวกับเดือนที่เลือก ไว้ใช้กับมุมมองรายเดือน
+  function monthWeeks(year, month) {
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const start = new Date(firstDay);
+    const dow = (start.getDay() + 6) % 7; // 0 = จันทร์
+    start.setDate(start.getDate() - dow);
+    const weeks = [];
+    let cur = new Date(start);
+    while (cur <= lastDay) {
+      const weekStart = new Date(cur);
+      const weekEnd = new Date(cur);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      weeks.push({ start: weekStart, end: weekEnd });
+      cur.setDate(cur.getDate() + 7);
+    }
+    return weeks;
+  }
+  function shortDate(dt) { return `${dt.getDate()} ${THAI_MONTH_ABBR_LOCAL[dt.getMonth()]}`; }
+
+  function monthRowHtml({ d, st, type }, dueDate) {
+    const meta = DEPTS[st.dept] || DEPTS.planning;
+    return `<tr style="border-left:3px solid ${meta.color}">
+      <td><strong>${dueDate.getDate()}</strong><small>${["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."][dueDate.getDay()]}</small></td>
+      <td><span class="ovw-type ovw-type-${type}">${type}</span></td>
+      <td><strong>${esc(d.id)}</strong></td>
+      <td>${esc(d.customer || "-")}</td>
+      <td>${esc(d.project || "-")}</td>
+      <td>${badge(st.dept, st.state)}</td>
+      <td>${stateTag(st.state, st.stateLabel)}</td>
+      <td class="num">${fmt(sqmOfDesign(d.id), 2)}</td>
+    </tr>`;
+  }
+
   function renderOverview() {
     const host = document.getElementById("overviewView");
     if (!host) return;
@@ -307,17 +372,20 @@
 
     const counts = {};
     DEPT_ORDER.forEach((k) => (counts[k] = 0));
-    let activeCount = 0, waitingCount = 0, storeCount = 0, shippedCount = 0, liveCount = 0, moCount = 0, soCount = 0;
-    rows.forEach(({ st, type }) => {
+    let activeCount = 0, waitingCount = 0, storeCount = 0, shippedCount = 0, liveCount = 0;
+    let totalSqm = 0, shippedSqm = 0;
+    rows.forEach(({ d, st, type }) => {
       counts[st.dept] = (counts[st.dept] || 0) + 1;
+      const sqm = sqmOfDesign(d.id);
+      totalSqm += sqm;
       if (st.dept === "done") {
-        if (st.state === "done") shippedCount++; else storeCount++;
+        if (st.state === "done") { shippedCount++; shippedSqm += sqm; } else storeCount++;
       } else if (st.state === "active") activeCount++;
       else if (st.state === "waiting") waitingCount++;
       if (st.source === "live") liveCount++;
-      if (type === "SO") soCount++; else moCount++;
     });
     const total = rows.length;
+    const waitingSqm = Math.max(0, totalSqm - shippedSqm);
     // นับเฉพาะงานที่ยังไม่เสร็จ (ไม่รวม dept "done") ไว้ใช้กับตัวกรอง M/O·S/O ของตารางด้านล่าง
     // เพราะตารางนั้นตัดงานที่เสร็จ/จัดส่งแล้วออกไปให้ดูที่หน้า Store แทน
     const activeTotal = total - storeCount - shippedCount;
@@ -328,27 +396,28 @@
     const dayStats = productionDayStats(rows, todayIso);
     const todayThai = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
 
-    const query =(document.getElementById("ovwSearch") ? document.getElementById("ovwSearch").value : "").trim().toLowerCase();
-    const deptFilter = host.dataset.deptFilter || "all";
+    const query = (document.getElementById("ovwSearch") ? document.getElementById("ovwSearch").value : "").trim().toLowerCase();
     const typeFilter = host.dataset.typeFilter || "all";
-    /* งานที่เสร็จ/จัดส่งแล้ว (dept "done") ตัดออกจากรายการหน้าแรกเสมอ — ให้ไปโชว์ที่หน้า
-       QC Dashboard → Store เท่านั้น หน้าภาพรวมการผลิตนี้จึงเหลือแต่งานที่ยังต้องติดตาม/ทำต่อจริง ๆ */
-    const filtered = rows.filter(({ d, st, type }) => {
-      if (st.dept === "done") return false;
-      if (deptFilter !== "all" && st.dept !== deptFilter) return false;
+    const pageMode = host.dataset.pageMode || "dept";
+    const monthOffset = Number(host.dataset.monthOffset || 0);
+    const matches = (d, type) => {
       if (typeFilter !== "all" && type !== typeFilter) return false;
       if (!query) return true;
       return `${d.id} ${d.moNo || ""} ${d.customer || ""} ${d.project || ""}`.toLowerCase().includes(query);
-    });
+    };
+
+    /* งานที่เสร็จ/จัดส่งแล้ว (dept "done") ตัดออกจากมุมมองตามแผนกเสมอ — ให้ไปโชว์ที่หน้า
+       QC Dashboard → Store เท่านั้น หน้าภาพรวมการผลิตนี้จึงเหลือแต่งานที่ยังต้องติดตาม/ทำต่อจริง ๆ */
+    const deptFiltered = rows.filter(({ d, st, type }) => st.dept !== "done" && matches(d, type));
 
     const stageCards = DEPT_ORDER.map((key) => {
       const meta = DEPTS[key];
       const n = counts[key] || 0;
       const pct = total ? Math.round((n / total) * 100) : 0;
-      const activeClass = deptFilter === key ? "is-active" : "";
       const isDone = key === "done";
-      // งาน "Store" (เสร็จ/จัดส่งแล้ว) ไม่มีอยู่ในตารางหน้านี้แล้ว — คลิกแล้วพาไปหน้า QC Dashboard → Store แทนการกรองตารางเปล่า
-      return `<button type="button" class="ovw-stage ${activeClass}" style="--c:${meta.color}" data-dept="${key}" ${isDone ? 'data-goto-store="1"' : ""}>
+      // งาน "Store" (เสร็จ/จัดส่งแล้ว) ไม่มีอยู่ในกลุ่มแผนกของหน้านี้แล้ว — คลิกแล้วพาไปหน้า QC Dashboard → Store แทน
+      // แผนกอื่น ๆ คลิกแล้วแค่เลื่อนไปที่กลุ่มแผนกนั้น (ไม่ต้องกดกรองถึงจะเห็นรายละเอียด — ทุกแผนกแสดงพร้อมกันอยู่แล้ว)
+      return `<button type="button" class="ovw-stage" style="--c:${meta.color}" data-dept="${key}" ${isDone ? 'data-goto-store="1"' : `data-scroll-dept="${key}"`}>
         <span class="ovw-stage-dot"></span>
         <strong>${n}</strong>
         <small>${esc(meta.short)}${isDone ? " ↗" : ""}</small>
@@ -356,28 +425,52 @@
       </button>`;
     }).join("");
 
-    const tableRows = filtered
-      .sort((a, b) => (a.st.state === "active" ? -1 : 1) - (b.st.state === "active" ? -1 : 1))
-      .map(({ d, st, type }) => {
-        const meta = DEPTS[st.dept] || DEPTS.planning;
-        const photo = designPhoto(d.id);
-        return `<tr style="border-left:3px solid ${meta.color}">
-          <td>${photo ? `<img class="ovw-thumb" src="${photo}" alt="">` : `<span class="ovw-thumb ovw-thumb-empty">-</span>`}</td>
-          <td><span class="ovw-type ovw-type-${type}">${type}</span></td>
-          <td><strong>${esc(d.id)}</strong><small>${esc(d.market === "DOMESTIC" ? "ในประเทศ" : d.market === "FOREIGN" ? "ต่างประเทศ" : "")}</small></td>
-          <td>${esc(d.customer || "-")}</td>
-          <td>${esc(d.project || "-")}</td>
-          <td>${esc(d.due || "-")}${d.planNote ? `<br><small class="ovw-plannote">⚠ ${esc(d.planNote)}</small>` : ""}</td>
-          <td>${badge(st.dept, st.state)}<br><small class="ovw-dept-label">${esc(meta.label)}</small></td>
-          <td>${d.weaveLocation ? `<span class="ovw-weaveloc ${d.weaveLocation === "SIAM" ? "ovw-weaveloc-in" : "ovw-weaveloc-out"}">${esc(d.weaveLocation === "SIAM" ? "ทอเอง" : d.weaveLocation)}</span>` : "-"}</td>
-          <td>${stateTag(st.state, st.stateLabel)}${st.source === "import" ? `<small class="ovw-src">${d.importSource === "MASTER PLAN 17-9-26" ? "ตาม MASTER PLAN 17 ก.ย." : "ตามข้อมูลนำเข้า 22 ก.ย."}</small>` : st.source === "live" ? '<small class="ovw-src ovw-src-live">อัปเดตจากระบบนี้</small>' : ""}</td>
-          <td><button type="button" class="action-button ovw-goto" data-view="${meta.view}">ไปที่หน้า ${esc(meta.short)}</button></td>
-        </tr>`;
-      })
-      .join("");
+    // --- มุมมองตามแผนก: แสดงทุกแผนกพร้อมกันเป็นกลุ่ม ไม่ต้องกดกรองก่อนถึงจะเห็นรายละเอียดของแผนกนั้น ---
+    const deptGroupsHtml = DEPT_ORDER.filter((k) => k !== "done").map((key) => {
+      const meta = DEPTS[key];
+      const groupRows = deptFiltered.filter((r) => r.st.dept === key)
+        .sort((a, b) => (a.st.state === "active" ? -1 : 1) - (b.st.state === "active" ? -1 : 1));
+      if (!groupRows.length) return "";
+      const groupSqm = groupRows.reduce((t, r) => t + sqmOfDesign(r.d.id), 0);
+      return `<details class="ovw-deptgroup" open data-dept-group="${key}" style="--c:${meta.color}">
+        <summary><strong>${esc(meta.label)}</strong><span class="ovw-deptgroup-count">${groupRows.length} รายการ · ${fmt(groupSqm, 2)} ตร.ม.</span></summary>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>รูป</th><th>ประเภท</th><th>เลขที่</th><th>ลูกค้า</th><th>Project / PO</th><th>กำหนดส่ง</th><th>แผนกปัจจุบัน</th><th>ที่ทอ</th><th>สถานะ</th><th></th></tr></thead>
+            <tbody>${groupRows.map(rowHtml).join("")}</tbody>
+          </table>
+        </div>
+      </details>`;
+    }).join("");
 
-    host.dataset.deptFilter = deptFilter;
+    // --- มุมมองรายเดือน: แสดงงานทั้งเดือนตามวันกำหนดส่ง (ใช้ข้อมูลสถานะจริงชุดเดียวกับมุมมองตามแผนก ไม่ใช่ Gantt เดิมที่พังอยู่) ---
+    const baseToday = new Date();
+    const targetMonthDate = new Date(baseToday.getFullYear(), baseToday.getMonth() + monthOffset, 1);
+    const targetYear = targetMonthDate.getFullYear();
+    const targetMonth = targetMonthDate.getMonth();
+    const monthRowsAll = rows
+      .filter(({ d, type }) => matches(d, type))
+      .map((r) => ({ ...r, dueDate: parseThaiDueDate(r.d.due) }))
+      .filter((r) => r.dueDate && r.dueDate.getFullYear() === targetYear && r.dueDate.getMonth() === targetMonth);
+    const monthSqm = monthRowsAll.reduce((t, r) => t + sqmOfDesign(r.d.id), 0);
+    const monthShippedCount = monthRowsAll.filter((r) => r.st.dept === "done" && r.st.state === "done").length;
+    const weeks = monthWeeks(targetYear, targetMonth);
+    const weeksHtml = weeks.map((wk, i) => {
+      const weekRows = monthRowsAll.filter((r) => r.dueDate >= wk.start && r.dueDate <= wk.end).sort((a, b) => a.dueDate - b.dueDate);
+      const weekSqm = weekRows.reduce((t, r) => t + sqmOfDesign(r.d.id), 0);
+      return `<div class="ovw-month-week">
+        <div class="ovw-month-week-head"><strong>สัปดาห์ที่ ${i + 1}</strong><span>${shortDate(wk.start)} – ${shortDate(wk.end)}</span><span>${weekRows.length} รายการ · ${fmt(weekSqm, 2)} ตร.ม.</span></div>
+        ${weekRows.length ? `<div class="table-wrap"><table>
+          <thead><tr><th>กำหนดส่ง</th><th>ประเภท</th><th>เลขที่</th><th>ลูกค้า</th><th>Project / PO</th><th>แผนกปัจจุบัน</th><th>สถานะ</th><th class="num">ตร.ม.</th></tr></thead>
+          <tbody>${weekRows.map((r) => monthRowHtml(r, r.dueDate)).join("")}</tbody>
+        </table></div>` : `<p class="col-empty">ไม่มีงานกำหนดส่งสัปดาห์นี้</p>`}
+      </div>`;
+    }).join("");
+    const monthLabel = `${monthNames[targetMonth]} ${targetYear + 543}`;
+
     host.dataset.typeFilter = typeFilter;
+    host.dataset.pageMode = pageMode;
+    host.dataset.monthOffset = String(monthOffset);
     host.innerHTML = `
       <section class="ovw-hero">
         <div>
@@ -391,6 +484,17 @@
           <div><strong>${waitingCount}</strong><span>รอคิว/รอวางแผน</span></div>
           <div><strong>${storeCount}</strong><span>สินค้าสำเร็จรูป รอนำส่ง</span></div>
           <div><strong>${shippedCount}</strong><span>จัดส่งแล้ว</span></div>
+        </div>
+      </section>
+
+      <section class="department-panel ovw-sqm-panel">
+        <div class="panel-heading">
+          <div><strong>สรุปตร.ม. การผลิต (ทุกงาน)</strong><small>รับเข้ารวม หักด้วยที่ส่งไปแล้ว เท่ากับยอดที่ยังรอนำส่ง (อยู่ระหว่างผลิต หรือรออยู่ในสโตร์)</small></div>
+        </div>
+        <div class="ovw-daykpi-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="ovw-daykpi-item"><strong>${fmt(totalSqm, 2)}</strong><span>ตร.ม. รับเข้ารวม</span></div>
+          <div class="ovw-daykpi-item"><strong>${fmt(waitingSqm, 2)}</strong><span>ตร.ม. รอนำส่ง (ยังไม่ส่ง)</span></div>
+          <div class="ovw-daykpi-item"><strong>${fmt(shippedSqm, 2)}</strong><span>ตร.ม. ส่งไปแล้ว</span></div>
         </div>
       </section>
 
@@ -420,7 +524,11 @@
 
       <section class="department-panel ovw-table-panel">
         <div class="panel-heading">
-          <div><strong>รายการงานที่ยังไม่เสร็จ</strong><small>คลิกแผนกด้านบนเพื่อกรอง หรือค้นหาด้วยเลข M/O · SO, ลูกค้า, Project — งานที่เสร็จ/จัดส่งแล้วทั้งหมดย้ายไปอยู่หน้า <u>QC Dashboard → Store</u> เท่านั้น</small></div>
+          <div><strong>รายละเอียดงานที่ยังไม่เสร็จ</strong><small>แสดงทุกแผนกพร้อมกัน — กดที่แผนกด้านบนเพื่อเลื่อนไปดู หรือค้นหาด้วยเลข M/O · SO, ลูกค้า, Project — งานที่เสร็จ/จัดส่งแล้วย้ายไปอยู่หน้า <u>QC Dashboard → Store</u> เท่านั้น</small></div>
+          <div class="segmented ovw-pagemode">
+            <button type="button" class="view-btn ${pageMode === "dept" ? "active" : ""}" data-page-mode="dept">ตามแผนก</button>
+            <button type="button" class="view-btn ${pageMode === "month" ? "active" : ""}" data-page-mode="month">มุมมองรายเดือน</button>
+          </div>
           <div class="segmented ovw-typefilter">
             <button type="button" class="view-btn ${typeFilter === "all" ? "active" : ""}" data-type="all">ทั้งหมด (${activeTotal})</button>
             <button type="button" class="view-btn ${typeFilter === "MO" ? "active" : ""}" data-type="MO">M/O (${activeMoCount})</button>
@@ -428,12 +536,23 @@
           </div>
           <label>ค้นหา<input id="ovwSearch" type="text" placeholder="เช่น MO-0109-26, ART RUGS" value="${esc(query)}"></label>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>รูป</th><th>ประเภท</th><th>เลขที่</th><th>ลูกค้า</th><th>Project / PO</th><th>กำหนดส่ง</th><th>แผนกปัจจุบัน</th><th>ที่ทอ</th><th>สถานะ</th><th></th></tr></thead>
-            <tbody>${tableRows || `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">ไม่พบรายการที่ตรงกับตัวกรอง</td></tr>`}</tbody>
-          </table>
-        </div>
+        ${pageMode === "month" ? `
+          <div class="ovw-month-nav">
+            <button type="button" class="square-btn" data-month-nav="-1">‹</button>
+            <strong>${esc(monthLabel)}</strong>
+            <button type="button" class="square-btn" data-month-nav="1">›</button>
+            ${monthOffset !== 0 ? `<button type="button" class="text-button" data-month-nav="0">กลับเดือนนี้</button>` : ""}
+            <span class="ovw-month-summary">${monthRowsAll.length} รายการกำหนดส่งเดือนนี้ · ${fmt(monthSqm, 2)} ตร.ม. · ส่งแล้ว ${monthShippedCount} รายการ</span>
+          </div>
+          <div class="ovw-month-weeks">${weeksHtml}</div>
+        ` : `
+          <div class="ovw-deptgroups">${deptGroupsHtml || `<p class="col-empty">ไม่พบรายการที่ตรงกับตัวกรอง</p>`}</div>
+        `}
+      </section>
+
+      <section class="department-panel pw-card" style="margin-top:10px">
+        <div class="panel-heading"><div><strong>คำขอไหมเพิ่มจากแผนกทอ (รอออกใบสั่งย้อม)</strong><small>เกิดจากแผนกทอแจ้งว่าไหมสีใดไม่พอ — ยืนยันผู้อนุมัติและออกใบสั่งย้อมเพิ่มได้ที่หน้า "แผนกทอ" แท็บ "สรุป/ส่งออก/แจ้งเตือน"</small></div></div>
+        <div class="pw-body" id="planningYarnRequests"></div>
       </section>
     `;
 
@@ -446,7 +565,21 @@
     host.querySelectorAll(".ovw-stage").forEach((btn) => {
       btn.addEventListener("click", () => {
         if (btn.dataset.gotoStore) { if (typeof setView === "function") setView("qcdash"); return; }
-        host.dataset.deptFilter = host.dataset.deptFilter === btn.dataset.dept ? "all" : btn.dataset.dept;
+        if (pageMode !== "dept") { host.dataset.pageMode = "dept"; renderOverview(); return; }
+        const target = host.querySelector(`[data-dept-group="${btn.dataset.scrollDept}"]`);
+        if (target) { target.open = true; target.scrollIntoView({ behavior: "smooth", block: "start" }); }
+      });
+    });
+    host.querySelectorAll(".ovw-pagemode [data-page-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        host.dataset.pageMode = btn.dataset.pageMode;
+        renderOverview();
+      });
+    });
+    host.querySelectorAll("[data-month-nav]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const nav = btn.dataset.monthNav;
+        host.dataset.monthOffset = nav === "0" ? "0" : String(monthOffset + Number(nav));
         renderOverview();
       });
     });
@@ -460,13 +593,7 @@
       btn.addEventListener("click", () => { if (typeof setView === "function") setView(btn.dataset.view); });
     });
 
-    // ตรึงหัวตาราง (thead) ไว้ใต้แถบค้นหา/กรอง ที่ก็ตรึงอยู่เช่นกัน — เลื่อนหน้าลง/ขึ้นแล้วยังเห็นหัวคอลัมน์เสมอ
-    const panelHeading = host.querySelector(".ovw-table-panel .panel-heading");
-    const theadCells = host.querySelectorAll(".ovw-table-panel thead th");
-    if (panelHeading && theadCells.length) {
-      const top = `${panelHeading.offsetHeight}px`;
-      theadCells.forEach((th) => { th.style.top = top; });
-    }
+    if (typeof renderPlanningYarnRequests === "function") renderPlanningYarnRequests();
   }
 
   window.renderOverview = renderOverview;

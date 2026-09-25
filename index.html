@@ -327,42 +327,6 @@
     <section id="calcView" class="app-view"></section>
     <section id="colorsView" class="app-view"></section>
 
-    <section id="planningView" class="app-view">
-      <section class="page-heading">
-        <div>
-          <p class="eyebrow">MASTER PRODUCTION SCHEDULE</p>
-          <h1>ตารางแผนผลิตรวม (Gantt) ทุกแผนก</h1>
-          <p class="subtitle">แสดงเฉพาะ Job ที่ฝ่ายขายเปิดงานและส่งมายัง Planning แล้ว</p>
-        </div>
-        <div class="heading-actions"><span>อัปเดต 21 ก.ย. 2026</span><button id="refreshButton">รีเฟรชข้อมูล</button></div>
-      </section>
-      <section id="summaryCards" class="summary-cards"></section>
-      <section class="control-strip">
-        <div class="segmented"><button class="view-btn active" data-scale="week">สัปดาห์</button><button class="view-btn" data-scale="month">เดือน</button><button class="view-btn" data-scale="quarter">ไตรมาส</button></div>
-        <label class="check-control"><input id="hideDone" type="checkbox"> ซ่อนงานเสร็จแล้ว</label>
-        <label class="check-control"><input id="showToday" type="checkbox" checked> แสดงวันนี้</label>
-        <div class="control-spacer"></div><span class="range-label">21 ก.ย. 2026 – 27 ก.ย. 2026</span>
-        <button class="square-btn" id="prevWeek">‹</button><button class="square-btn" id="nextWeek">›</button>
-      </section>
-      <section class="legend-row">
-        <span><i class="legend production"></i>Production</span><span><i class="legend dyeing"></i>Dyeing</span><span><i class="legend weaving"></i>Weaving</span><span><i class="legend finishing"></i>Finishing</span><span><i class="legend store"></i>Store</span><span><i class="legend milestone"></i>Milestone</span>
-        <label>ค้นหา<input id="searchInput" placeholder="ค้นหา Job, Project หรือแผนก"></label>
-      </section>
-      <section class="gantt-panel">
-        <div class="gantt-toolbar"><strong>Master Plan · Production Schedule</strong><span id="resultCount">0 งาน</span><span class="toolbar-note">Design approved → Sales opened → Planning</span></div>
-        <div class="gantt"><div class="gantt-left"><div class="left-head">รายการงาน</div><div id="taskRows"></div></div><div class="gantt-right"><div id="dateHeader" class="date-header"></div><div id="barsArea" class="bars-area"></div></div></div>
-      </section>
-      <section class="bottom-panel"><div><strong>Job ที่รอจัดสรรแผน</strong><p>งานที่ฝ่ายขายเปิดแล้ว แต่ Planning ยังไม่ได้กำหนดวันเริ่ม</p></div><span id="unallocatedCount">0 รายการ</span></section>
-      <section class="department-panel pw-card" style="margin-top:10px">
-        <div class="panel-heading"><div><strong>KPI แผนกวางแผน — ส่งตรงตามกำหนด</strong><small>วันส่งจริงตัดจากฝ่ายขาย (ต้องมีทั้งเลข INV และวันที่ยืนยันส่งจริง) เทียบกับกำหนดที่ Planning วางแผนไว้</small></div></div>
-        <div class="pw-body" id="planningKpiTable"></div>
-      </section>
-      <section class="department-panel pw-card" style="margin-top:10px">
-        <div class="panel-heading"><div><strong>คำขอไหมเพิ่มจากแผนกทอ (รอออกใบสั่งย้อม)</strong><small>เกิดจากแผนกทอแจ้งว่าไหมสีใดไม่พอ — ยืนยันผู้อนุมัติและออกใบสั่งย้อมเพิ่มได้ที่หน้า "แผนกทอ" แท็บ "สรุป/ส่งออก/แจ้งเตือน"</small></div></div>
-        <div class="pw-body" id="planningYarnRequests"></div>
-      </section>
-    </section>
-
     <section id="shippingView" class="app-view"></section>
     <section id="planworkView" class="app-view"></section>
     <section id="dyeingView" class="app-view"></section>

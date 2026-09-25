@@ -231,6 +231,25 @@
     </table></div>` : `<p class="col-empty">ยังไม่มีข้อมูล KPI แผนกย้อม — นำเข้าไฟล์ Excel ด้านบน</p>`;
   }
 
+  /* ---------- KPI แผนกวางแผน — ส่งตรงตามกำหนด (จากข้อมูลสดในระบบนี้ ไม่ใช่ไฟล์นำเข้า) ----------
+     ย้ายมาจากหน้า "ภาพรวมการผลิต" เดิม (ท้าย Master Plan Gantt ที่เลิกใช้แล้ว) — ใช้ WeavingEngine.planningKpi()
+     ชุดเดียวกับของเดิมทุกประการ (เทียบวันส่งจริงจากฝ่ายขาย ต้องมีทั้งเลข INV และวันที่ยืนยันส่งจริง กับกำหนดที่
+     Planning วางแผนไว้ตอนบันทึกใบวางแผนงาน) — คนละชุดข้อมูลกับ "KPI แผนกวางแผน (ส่งมอบ)" ด้านล่างซึ่งมาจากไฟล์ Excel นำเข้า */
+  function renderPlanningOnTimeKpi() {
+    const el = $("#kpiPlanningOnTimeTable");
+    const summaryEl = $("#kpiPlanningOnTimeSummary");
+    if (!el) return;
+    const kpi = typeof WeavingEngine !== "undefined" && WeavingEngine.planningKpi ? WeavingEngine.planningKpi() : null;
+    if (summaryEl) {
+      summaryEl.textContent = kpi && kpi.passRate != null
+        ? `${kpi.passRate.toFixed(0)}% ส่งตรงตามกำหนด · ผ่าน ${kpi.onTime} · ไม่ผ่าน ${kpi.late} · รอส่ง/รอ INV ${kpi.pending} (จาก M/O ที่ Planning บันทึกแผนแล้ว ${kpi.intake} รายการ)`
+        : "ยังไม่มีข้อมูลวันส่งจริงจากฝ่ายขายที่เทียบได้";
+    }
+    if (!kpi || !kpi.rows.length) { el.innerHTML = `<p class="col-empty">ยังไม่มี M/O ที่ Planning บันทึกแผน</p>`; return; }
+    const statusTagEl = (s) => s === "onTime" ? tag("ส่งตรงตามกำหนด", "") : s === "late" ? tag("ส่งล่าช้า", "blocked") : tag("รอส่ง/รอ INV", "review");
+    el.innerHTML = `<table class="calc-table"><thead><tr><th>Design</th><th>M/O</th><th>โปรเจกต์</th><th>กำหนดตาม Plan</th><th>เลข INV</th><th>วันส่งจริง</th><th>สถานะ</th></tr></thead><tbody>${kpi.rows.map((r) => `<tr><td>${esc(r.designId)}</td><td>${esc(r.moNo)}</td><td>${esc(r.project)}</td><td>${esc(r.committed || "-")}</td><td>${esc(r.inv || "-")}</td><td>${esc(r.shipped || "-")}</td><td>${statusTagEl(r.status)}</td></tr>`).join("")}</tbody></table>`;
+  }
+
   /* ---------- KPI แผนกวางแผน/ส่งมอบ (Planning_KPI.xlsx ชีต "1.ส่งมอบทั้งหมด ") ---------- */
   async function importPlanningKpiExcel(file) {
     if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
@@ -530,6 +549,14 @@
       </section>
 
       <section class="department-panel pw-card wide">
+        <div class="panel-heading"><div><strong>KPI แผนกวางแผน — ส่งตรงตามกำหนด</strong><small>จากข้อมูลสดในระบบนี้ (ไม่ต้องนำเข้าไฟล์) — เทียบกำหนดที่ Planning วางแผนไว้ตอนบันทึกใบวางแผนงาน กับวันส่งจริงจากฝ่ายขาย (ต้องมีทั้งเลข INV และวันที่ยืนยันส่งจริง) · ย้ายมาจากหน้า "ภาพรวมการผลิต" เดิม</small></div></div>
+        <div class="pw-body">
+          <p id="kpiPlanningOnTimeSummary" class="import-status" style="margin:0 0 8px"></p>
+          <div id="kpiPlanningOnTimeTable"></div>
+        </div>
+      </section>
+
+      <section class="department-panel pw-card wide">
         <div class="panel-heading"><div><strong>นำเข้ารายงาน KPI แผนกย้อม (Dye)</strong><small>นำเข้าไฟล์ Excel รายงาน KPI แผนกย้อม (อ่านเฉพาะชีต "MO" และ " ย้อมเพิ่ม ") — จับคู่กับ M/O ในระบบอัตโนมัติ</small></div></div>
         <div class="pw-body">
           <div class="pw-row"><label class="file-picker">นำเข้าจาก Excel<input type="file" id="kpiDyeFile" accept=".xlsx,.xls" data-import-dye-kpi></label></div>
@@ -573,6 +600,7 @@
   function renderAll() {
     populateDesignerPeriods();
     renderDesignerKpi();
+    renderPlanningOnTimeKpi();
     renderDyeKpiResults();
     renderPlanningKpiResults();
     if ($("#kpiPatternResults")) $("#kpiPatternResults").innerHTML = patternKpiResultsHtml();

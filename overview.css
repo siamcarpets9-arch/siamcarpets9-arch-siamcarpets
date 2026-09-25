@@ -1,6 +1,5 @@
 .workflow-strip.hidden-strip{display:none}
 .nav-link.qc-external-link{text-decoration:none;display:inline-block;border-color:#7fb8b3;background:#12565c}
-#planningView{margin-top:22px;padding-top:20px;border-top:2px dashed var(--line)}
 .ovw-hero{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:22px 26px;margin-bottom:12px;background:linear-gradient(120deg,var(--nav) 0%,#136069 65%,#178a86 100%);color:#fff;border-radius:4px}
 .ovw-hero .eyebrow{color:#a9d9d2}
 .ovw-hero h1{margin:4px 0;font-size:24px;color:#fff}
@@ -53,3 +52,29 @@
 @media(max-width:1100px){.ovw-stagebar{grid-template-columns:repeat(4,1fr)}}
 @media(max-width:900px){.ovw-hero{flex-direction:column;align-items:flex-start}.ovw-hero-kpi{width:100%;justify-content:space-between}}
 @media(max-width:520px){.ovw-stagebar{grid-template-columns:repeat(3,1fr)}}
+
+.ovw-sqm-panel{margin-bottom:12px}
+
+/* กลุ่มตารางตามแผนก — แสดงทุกแผนกพร้อมกัน (details เปิดไว้ตั้งแต่แรก ไม่ต้องกดเพื่อดูรายละเอียด แต่ยุบเก็บได้ถ้าไม่สนใจ) */
+.ovw-deptgroups{display:flex;flex-direction:column;gap:10px}
+.ovw-deptgroup{border:1px solid var(--line);border-left:4px solid var(--c);border-radius:4px;overflow:hidden;scroll-margin-top:70px}
+.ovw-deptgroup summary{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;cursor:pointer;background:#f7fbfa;list-style:none;font-size:12px}
+.ovw-deptgroup summary::-webkit-details-marker{display:none}
+.ovw-deptgroup summary::before{content:"▸";display:inline-block;margin-right:8px;color:var(--c);transition:transform .12s}
+.ovw-deptgroup[open] summary::before{transform:rotate(90deg)}
+.ovw-deptgroup summary strong{color:var(--ink)}
+.ovw-deptgroup-count{color:var(--muted);font-size:10.5px;font-weight:700}
+.ovw-deptgroup .table-wrap{padding:0 2px 2px}
+
+.ovw-pagemode{margin-right:6px}
+
+/* มุมมองรายเดือน */
+.ovw-month-nav{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--line);flex-wrap:wrap}
+.ovw-month-nav strong{min-width:120px;text-align:center}
+.ovw-month-summary{margin-left:auto;color:var(--muted);font-size:10.5px;font-weight:700}
+.ovw-month-weeks{display:flex;flex-direction:column;gap:10px;padding:10px 16px 16px}
+.ovw-month-week{border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.ovw-month-week-head{display:flex;align-items:center;gap:12px;padding:8px 14px;background:#f7fbfa;font-size:11px}
+.ovw-month-week-head span{color:var(--muted);font-size:10px;font-weight:700}
+.ovw-month-week .table-wrap{padding:0 2px 2px}
+@media(max-width:900px){.ovw-month-summary{margin-left:0;width:100%}}
