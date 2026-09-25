@@ -1040,7 +1040,7 @@ function inPeriod(dateValue, range){
 function setView(view){
   $$(".app-view").forEach((section)=>section.classList.toggle("active-view",section.id===`${view}View`));
   $$(".nav-link[data-view]").forEach((button)=>button.classList.toggle("active",button.dataset.view===view));
-  const flowView=({cost:"design",salesreport:"sales",shipping:"sales",calc:"design",colors:"design",planwork:"planning",dyeing:"planning",pattern:"planning",weaveissue:"planning",weavefloor:"planning",finishing:"planning",qcdash:"planning",store:"planning"})[view]||view; // หน้าต้นทุนอยู่ในขั้น Design · รายงานขาย/ใบส่งอยู่ในขั้น Sales · ใบวางแผนงาน/แผนกย้อม/เจาะลาย/ส่งแผนกทอ/แผนกทอ/ทากาวตกแต่ง/QC/สโตร์ อยู่ในขั้น Planning
+  const flowView=({cost:"design",salesreport:"sales",shipping:"sales",calc:"design",colors:"design",planwork:"planning",dyeing:"planning",dyecombined:"planning",pattern:"planning",weaveissue:"planning",weavefloor:"planning",finishing:"planning",qcdash:"planning",store:"planning"})[view]||view; // หน้าต้นทุนอยู่ในขั้น Design · รายงานขาย/ใบส่งอยู่ในขั้น Sales · ใบวางแผนงาน/แผนกย้อม/ใบสั่งย้อมรวม/เจาะลาย/ส่งแผนกทอ/แผนกทอ/ทากาวตกแต่ง/QC/สโตร์ อยู่ในขั้น Planning
   $$(".workflow-step").forEach((step)=>{
     const order={design:1,sales:2,planning:3};
     step.classList.toggle("active",step.dataset.workflow===flowView);
@@ -1057,6 +1057,7 @@ function setView(view){
   if(view==="colors"&&typeof renderColors==="function") renderColors();
   if(view==="planwork"&&typeof renderPlanWork==="function") renderPlanWork();
   if(view==="dyeing"&&typeof renderDyeing==="function") renderDyeing();
+  if(view==="dyecombined"&&typeof renderDyeCombined==="function") renderDyeCombined();
   if(view==="pattern"&&typeof renderPattern==="function") renderPattern();
   if(view==="weaveissue"&&typeof renderWeaveIssue==="function") renderWeaveIssue();
   if(view==="weavefloor"&&typeof renderWeaveFloor==="function") renderWeaveFloor();

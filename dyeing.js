@@ -290,7 +290,9 @@
       <div class="pw-body">
         <table class="calc-table"><thead><tr><th>วันที่</th><th>ชนิดไหม</th><th>เบิกจาก Lot / Surplus</th><th>Colour No.</th><th>Colour code</th><th>Batch No.</th><th class="num">กก.</th><th>หมายเหตุ</th></tr></thead><tbody>${g.unmatchedRows.map(actualRowHtml).join("")}</tbody></table>
       </div>
-    </section>` : ""}`;
+    </section>` : ""}
+
+    ${g.designId && typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(g.designId, "dyeing") : ""}`;
   }
 
   function res(label, value, cls = "") { return `<div class="pr ${cls}"><small>${label}</small><strong>${value}</strong></div>`; }
@@ -412,9 +414,11 @@
       }
       const pick = e.target.closest("[data-dpick]");
       if (pick) { state.selectedKey = pick.dataset.dpick; renderAll(); return; }
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
     });
     root.addEventListener("input", (e) => {
-      if (e.target && e.target.id === "dySearch") { state.query = e.target.value; renderAll(); }
+      if (e.target && e.target.id === "dySearch") { state.query = e.target.value; renderAll(); return; }
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange) CostEngine.handleExtraCostFieldChange(e);
     });
   }
 

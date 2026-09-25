@@ -78,3 +78,14 @@
 .ovw-month-week-head span{color:var(--muted);font-size:10px;font-weight:700}
 .ovw-month-week .table-wrap{padding:0 2px 2px}
 @media(max-width:900px){.ovw-month-summary{margin-left:0;width:100%}}
+
+/* ปุ่ม "ผ่าน" (M/O,S/O ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิต) — ใช้ร่วมกันได้ทุกหน้า */
+.ovw-skip-btn{margin-left:6px;padding:5px 8px;border:1px solid var(--line);background:#fff;color:var(--muted);font-size:9px;font-weight:900;cursor:pointer}
+.ovw-skip-btn:hover{border-color:var(--red);color:var(--red)}
+
+/* รายการที่กดผ่านแล้ว (ยุบเก็บไว้ท้ายหน้า เผื่อยกเลิกผ่าน) */
+.ovw-skipped-panel{margin-top:10px;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:#fff}
+.ovw-skipped-panel summary{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;background:#f7fbfa;list-style:none;font-size:12px}
+.ovw-skipped-panel summary::-webkit-details-marker{display:none}
+.ovw-skipped-panel summary span{color:var(--muted);font-size:10px;font-weight:700}
+.ovw-skipped-panel .table-wrap{padding:0 2px 2px}

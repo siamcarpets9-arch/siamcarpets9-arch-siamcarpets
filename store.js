@@ -28,7 +28,9 @@
 
   const KEY_LEDGER = "siam-store-raw-material-ledger"; // [{id,date,direction:"in"|"out",materialName,unit,qty,refNo,note,createdAt}]
 
-  const state = { fgQuery: "", fgFilter: "all", fgSelected: new Set(), fgBulkDate: todayIso() };
+  // fgFilter เริ่มต้น "instore" (ไม่ใช่ "all") — ของที่ตัดออก/ส่งไปแล้วไม่ต้องมาปนกวนรายการ Store ที่ยังอยู่จริง
+  // ยังกดแท็บ "ตัดออกแล้ว"/"ทั้งหมด" เพื่อดูประวัติได้เสมอ ไม่ได้ลบข้อมูลทิ้ง
+  const state = { fgQuery: "", fgFilter: "instore", fgSelected: new Set(), fgBulkDate: todayIso() };
 
   /* ============================================================
      1) เบิกเข้า-ออกวัตถุดิบ — บัญชีทั่วไป
@@ -37,6 +39,15 @@
   function saveLedger(list) { writeJson(KEY_LEDGER, list); }
   function addLedgerEntry(entry) { const list = loadLedger(); list.push({ id: uid("mat"), createdAt: new Date().toISOString(), ...entry }); saveLedger(list); return list; }
   function deleteLedgerEntry(id) { saveLedger(loadLedger().filter((e) => e.id !== id)); }
+  function updateLedgerEntry(id, field, value) {
+    const list = loadLedger();
+    const row = list.find((e) => e.id === id);
+    if (!row) return;
+    if (field === "direction") row.direction = value === "out" ? "out" : "in";
+    else if (field === "qty") row.qty = num(value);
+    else row[field] = value;
+    saveLedger(list);
+  }
 
   function materialBalances() {
     const map = new Map();
@@ -69,13 +80,14 @@
   }
 
   function ledgerRowHtml(e) {
-    return `<tr>
-      <td>${esc(e.date || "-")}</td>
-      <td><span class="status-tag ${e.direction === "in" ? "" : "blocked"}">${e.direction === "in" ? "รับเข้า" : "เบิกออก"}</span></td>
-      <td><strong>${esc(e.materialName)}</strong></td>
-      <td class="num">${fmt(num(e.qty), 2)} ${esc(e.unit || "")}</td>
-      <td>${esc(e.refNo || "-")}</td>
-      <td>${esc(e.note || "-")}</td>
+    // แก้ไขรายการเดิมได้ตรงตาราง (ไม่ต้องลบแล้วเพิ่มใหม่) — บันทึกตอน blur/เปลี่ยนค่า (change) ไม่ใช่ทุกตัวอักษรที่พิมพ์ กันโฟกัสหลุดระหว่างพิมพ์
+    return `<tr data-ledger-row="${esc(e.id)}">
+      <td><input type="date" name="date" value="${esc(e.date || "")}"></td>
+      <td><select name="direction"><option value="in" ${e.direction === "in" ? "selected" : ""}>รับเข้า</option><option value="out" ${e.direction === "out" ? "selected" : ""}>เบิกออก</option></select></td>
+      <td><input type="text" name="materialName" value="${esc(e.materialName)}" style="min-width:150px"></td>
+      <td class="num"><input type="text" name="qty" inputmode="decimal" value="${esc(e.qty)}" class="pw-num" style="width:70px">&nbsp;<input type="text" name="unit" value="${esc(e.unit || "")}" style="width:55px" placeholder="หน่วย"></td>
+      <td><input type="text" name="refNo" value="${esc(e.refNo || "")}" style="min-width:90px"></td>
+      <td><input type="text" name="note" value="${esc(e.note || "")}" style="min-width:120px"></td>
       <td><button type="button" class="text-button" data-del-ledger="${esc(e.id)}" title="ลบรายการนี้ทิ้ง">ลบ</button></td>
     </tr>`;
   }
@@ -268,6 +280,16 @@
       if (e.target && e.target.id === "storeFgBulkDate") { state.fgBulkDate = e.target.value; }
     });
     root.addEventListener("change", (e) => {
+      const ledgerRow = e.target.closest("[data-ledger-row]");
+      if (ledgerRow) {
+        const name = e.target.name;
+        if (name) {
+          if (name === "materialName" && !e.target.value.trim()) { toast("ชื่อวัตถุดิบห้ามว่าง"); renderAll(); return; }
+          updateLedgerEntry(ledgerRow.dataset.ledgerRow, name, e.target.value);
+          renderAll();
+        }
+        return;
+      }
       const cb = e.target.closest("[data-fg-select]");
       if (cb) {
         const id = cb.dataset.fgSelect;
@@ -338,6 +360,6 @@
     renderAll();
   }
 
-  window.StoreEngine = { KEY_LEDGER, loadLedger, addLedgerEntry, deleteLedgerEntry, materialBalances, finishedGoodsRows };
+  window.StoreEngine = { KEY_LEDGER, loadLedger, addLedgerEntry, deleteLedgerEntry, updateLedgerEntry, materialBalances, finishedGoodsRows };
   window.renderStore = renderStore;
 })();

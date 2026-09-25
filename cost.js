@@ -13,6 +13,8 @@
   const KEY_SETTINGS = "enterprise-design-cost-settings";
   const KEY_TRIPS = "enterprise-design-site-surveys";
   const KEY_OVERRIDES = "enterprise-design-cost-overrides";
+  const KEY_MATERIALS = "siam-material-prices"; // [{id,name,unit,price,note}] — ราคาวัตถุดิบปัจจุบัน แก้ไข/เพิ่มเองได้ ใช้ร่วมกันทุกแผนก
+  const KEY_EXTRA_COSTS = "siam-mo-extra-costs"; // { [designId]: [{id,label,amount,dept,addedAt}] } — ค่าใช้จ่ายอื่นต่อ M/O เพิ่มได้จากทุกแผนก
   const NO_SALE = "ยังไม่ระบุ Sale";
 
   const STD_TYPES = ["ทำแบบ", "Layout", "Clean + Layout", "Clean", "แก้แบบ", "แก้สี", "SO"];
@@ -615,6 +617,119 @@
     $c("#costTripBody").innerHTML = rows.length ? rows.map(tripRowHtml).join("") : `<tr><td colspan="9" class="empty-gantt">ยังไม่มีทริปวัดพื้นที่ในช่วงเวลาที่เลือก — กด “+ บันทึกทริปวัดพื้นที่”</td></tr>`;
   }
 
+  /* ============================================================
+     ราคาวัตถุดิบปัจจุบัน — รายการอิสระ ตั้งชื่อ/หน่วย/ราคาเองได้ เพิ่ม-แก้ไข-ลบได้ไม่จำกัด
+     ใช้เป็น "ราคากลาง" ให้จุดกรอกราคาวัตถุดิบใน M/O (เช่น ราคาไหมในใบสั่งย้อม, ราคากาว, ราคาผ้าตาข่าย)
+     ดึงไปเติมให้อัตโนมัติเมื่อยังไม่เคยกรอก — ยังแก้ไขเฉพาะออเดอร์ได้ตามจริงเสมอ
+     ============================================================ */
+  function loadMaterials() {
+    let list = readJson(KEY_MATERIALS, null);
+    if (!Array.isArray(list)) {
+      // ตั้งต้นจากชนิดไหมที่มีอยู่แล้วในระบบ (ยังไม่มีราคา — กรอกเพิ่มเองได้)
+      const yarnTypes = (typeof PlanningEngine !== "undefined" && Array.isArray(PlanningEngine.YARN_TYPES_DEFAULT)) ? PlanningEngine.YARN_TYPES_DEFAULT : [];
+      list = yarnTypes.map((y) => ({ id: "mat-" + y.code, name: y.code, unit: "กก.", price: 0, note: y.name }));
+      writeJson(KEY_MATERIALS, list);
+    }
+    return list;
+  }
+  function saveMaterials(list) { writeJson(KEY_MATERIALS, list); }
+  function addMaterialRow() {
+    const list = loadMaterials();
+    list.push({ id: "mat" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: "", unit: "กก.", price: 0, note: "" });
+    saveMaterials(list);
+    return list;
+  }
+  function removeMaterialRow(id) { saveMaterials(loadMaterials().filter((m) => m.id !== id)); }
+  // จับคู่ชื่อวัตถุดิบแบบไม่สนตัวพิมพ์เล็ก-ใหญ่/เว้นวรรค — คืนราคาถ้าพบและมากกว่า 0 เท่านั้น (ยังไม่กรอกราคา = ไม่ดึงไปเติมให้)
+  function materialPriceFor(name) {
+    const n = clean(name).toUpperCase();
+    if (!n) return null;
+    const m = loadMaterials().find((x) => clean(x.name).toUpperCase() === n);
+    return m && num(m.price) > 0 ? num(m.price) : null;
+  }
+  function materialRowHtml(m) {
+    return `<tr data-mat-row="${esc(m.id)}">
+      <td><input name="name" value="${esc(m.name)}" placeholder="เช่น BBVC, กาวลาเท็กซ์, ผ้าตาข่าย"></td>
+      <td><input name="unit" value="${esc(m.unit)}" placeholder="กก./เมตร/..." style="width:70px"></td>
+      <td><input name="price" value="${esc(m.price)}" inputmode="decimal" style="width:80px"></td>
+      <td><input name="note" value="${esc(m.note)}" placeholder="หมายเหตุ (ถ้ามี)"></td>
+      <td><button type="button" class="pw-worker-x" data-act="del-material" data-id="${esc(m.id)}">×</button></td></tr>`;
+  }
+  function materialsBlockHtml() {
+    const list = loadMaterials();
+    return `<div class="settings-block">
+      <h3>5) ราคาวัตถุดิบปัจจุบัน <small>รายการอิสระ ตั้งชื่อ/หน่วย/ราคาเองได้ — M/O ที่ต้องกรอกราคาวัตถุดิบ (เช่น ราคาไหมในใบสั่งย้อม, กาว, ผ้าตาข่าย) จะดึงราคานี้ไปเติมให้อัตโนมัติเมื่อยังไม่เคยกรอก</small></h3>
+      <table class="settings-table"><thead><tr><th>ชื่อวัตถุดิบ</th><th>หน่วย</th><th>ราคา/หน่วย (บาท)</th><th>หมายเหตุ</th><th></th></tr></thead>
+      <tbody>${list.map(materialRowHtml).join("") || `<tr><td colspan="5" class="col-empty">ยังไม่มีรายการ — กด “+ เพิ่มวัตถุดิบ”</td></tr>`}</tbody></table>
+      <div class="settings-actions"><button type="button" class="action-button" data-act="add-material">+ เพิ่มวัตถุดิบ</button></div>
+    </div>`;
+  }
+
+  /* ============================================================
+     ค่าใช้จ่ายอื่นที่เกิดขึ้นต่อ M/O — เพิ่ม/แก้ไข/ลบได้จากทุกแผนก (วางแผน/ย้อม/ทอ/ปั๊ม/ตกแต่ง ฯลฯ)
+     เช่น ค่าพนักงานไปแก้ไขพรม (เงินเดือน+โอที), ค่ารถ, อื่น ๆ — เก็บกลางที่นี่ ดึงไปรวมในสรุปต้นทุนต่อ M/O
+     ============================================================ */
+  function loadExtraCostsAll() { const all = readJson(KEY_EXTRA_COSTS, {}); return all && typeof all === "object" ? all : {}; }
+  function saveExtraCostsAll(all) { writeJson(KEY_EXTRA_COSTS, all); }
+  function loadExtraCosts(designId) { const list = loadExtraCostsAll()[designId]; return Array.isArray(list) ? list : []; }
+  function saveExtraCosts(designId, list) {
+    const all = loadExtraCostsAll();
+    if (list.length) all[designId] = list; else delete all[designId];
+    saveExtraCostsAll(all);
+  }
+  function addExtraCostRow(designId, dept) {
+    const list = loadExtraCosts(designId);
+    list.push({ id: "ec" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), label: "", amount: "", dept: dept || "", addedAt: new Date().toISOString() });
+    saveExtraCosts(designId, list);
+    return list;
+  }
+  function removeExtraCostRow(designId, id) { saveExtraCosts(designId, loadExtraCosts(designId).filter((r) => r.id !== id)); }
+  function updateExtraCostRow(designId, id, field, value) {
+    const list = loadExtraCosts(designId);
+    const row = list.find((r) => r.id === id);
+    if (row) { row[field] = value; saveExtraCosts(designId, list); }
+  }
+  function extraCostsTotalFor(designId) { return loadExtraCosts(designId).reduce((t, r) => t + num(r.amount), 0); }
+  // วิดเจ็ตสำเร็จรูปให้ทุกแผนก embed ได้เหมือนกัน — ผูกกับ designId เดียว ใช้ event-delegation ของหน้านั้น ๆ เอง
+  // (เช็ค data-cost-extra-add / data-cost-extra-remove ในตัวจัดการ click, และ data-cost-extra-row ในตัวจัดการ input/change ของไฟล์ที่ embed)
+  function extraCostWidgetHtml(designId, dept) {
+    const list = loadExtraCosts(designId);
+    const total = extraCostsTotalFor(designId);
+    return `<section class="department-panel pw-card wide" data-cost-extra-root data-cost-extra-design="${esc(designId)}" data-cost-extra-dept="${esc(dept || "")}">
+      <div class="panel-heading"><div><strong>ค่าใช้จ่ายอื่นที่เกิดขึ้นกับ M/O นี้</strong><small>เช่น ค่าพนักงานไปแก้ไขพรม (เงินเดือน+โอที), ค่ารถ, อื่น ๆ — เพิ่ม/แก้ไข/ลบได้ รวมเข้าสรุปต้นทุนต่อ M/O ทันที</small></div></div>
+      <div class="pw-body">
+        <table class="calc-table"><thead><tr><th>รายการ</th><th class="num">จำนวนเงิน (บาท)</th><th></th></tr></thead>
+        <tbody>${list.map((r) => `<tr data-cost-extra-row="${esc(r.id)}"><td><input name="label" value="${esc(r.label)}" placeholder="เช่น ค่าพนักงานไปแก้ไขพรม (เงินเดือน+โอที)"></td><td><input name="amount" value="${esc(r.amount)}" inputmode="decimal" class="pw-num tiny"></td><td><button type="button" class="pw-worker-x" data-cost-extra-remove="${esc(r.id)}">×</button></td></tr>`).join("") || `<tr><td colspan="3" class="col-empty">ยังไม่มีรายการ</td></tr>`}</tbody></table>
+        <div class="pw-save-bar"><button type="button" class="action-button" data-cost-extra-add>+ เพิ่มรายการค่าใช้จ่าย</button><small>รวม ${fmtMoney(total)}</small></div>
+      </div>
+    </section>`;
+  }
+  // ตัวจัดการ event กลาง — ไฟล์แผนกต่าง ๆ เรียกจากตัวจัดการ click/input/change ของตัวเองได้เลย (คืน true ถ้าจัดการแล้ว)
+  function handleExtraCostClick(e, rerender) {
+    const add = e.target.closest && e.target.closest("[data-cost-extra-add]");
+    if (add) {
+      const rootEl = add.closest("[data-cost-extra-root]");
+      addExtraCostRow(rootEl.dataset.costExtraDesign, rootEl.dataset.costExtraDept);
+      if (typeof rerender === "function") rerender();
+      return true;
+    }
+    const rm = e.target.closest && e.target.closest("[data-cost-extra-remove]");
+    if (rm) {
+      const rootEl = rm.closest("[data-cost-extra-root]");
+      removeExtraCostRow(rootEl.dataset.costExtraDesign, rm.dataset.costExtraRemove);
+      if (typeof rerender === "function") rerender();
+      return true;
+    }
+    return false;
+  }
+  function handleExtraCostFieldChange(e) {
+    const row = e.target.closest && e.target.closest("[data-cost-extra-row]");
+    if (!row) return false;
+    const rootEl = row.closest("[data-cost-extra-root]");
+    updateExtraCostRow(rootEl.dataset.costExtraDesign, row.dataset.costExtraRow, e.target.name, e.target.value);
+    return true;
+  }
+
   /* ---------- render: ตั้งค่า ---------- */
   const numField = (key, label, step = "1", hint = "") => `<label>${label}<input type="number" step="${step}" min="0" data-set="${key}" value="${S[key]}">${hint ? `<em>${hint}</em>` : ""}</label>`;
   const textField = (key, label, type = "time") => `<label>${label}<input type="${type}" data-set="${key}" value="${esc(S[key])}"></label>`;
@@ -658,6 +773,7 @@
           ${customers.map((c) => `<label><span>${esc(c.name)} <em>${c.designs} แบบ</em></span><input list="costSaleList" data-cust-sale="${esc(c.key)}" value="${esc(S.customerSale[c.key] || "")}" placeholder="${NO_SALE}"></label>`).join("") || "<em>ยังไม่มีข้อมูลลูกค้า</em>"}
         </div>
       </div>
+      ${materialsBlockHtml()}
       <div class="settings-actions"><button class="action-button" data-act="reset-settings">รีเซ็ตพารามิเตอร์เป็นค่าเริ่มต้น</button><small>ค่าที่แก้จะบันทึกในเบราว์เซอร์นี้ทันที (ไม่ลบเงินเดือนและ Sale ที่กรอกไว้)</small></div>`;
   }
 
@@ -776,6 +892,13 @@
       const keep = { salaries: S.salaries, customerSale: S.customerSale, projectSale: S.projectSale, defaultSalary: S.defaultSalary, confirmed: S.confirmed };
       S = { ...loadDefaults(), ...keep }; saveSettings(); renderSettings(); renderResults(); toast("รีเซ็ตพารามิเตอร์แล้ว");
     }
+    else if (act === "add-material") { addMaterialRow(); renderSettings(); }
+    else if (act === "del-material") { removeMaterialRow(el.dataset.id); renderSettings(); }
+  }
+  function updateMaterialField(id, field, value) {
+    const list = loadMaterials();
+    const row = list.find((m) => m.id === id);
+    if (row) { row[field] = value; saveMaterials(list); }
   }
   const loadDefaults = () => ({ ...DEFAULTS, workWeekdays: [...DEFAULTS.workWeekdays], stdHours: { ...DEFAULTS.stdHours }, salaries: {}, customerSale: {}, projectSale: {} });
 
@@ -818,6 +941,8 @@
       renderResults({ keepProjectTable: false, keepDetail: true });
       patchDetailRow(id);
     }
+    const matRow = t.closest("[data-mat-row]");
+    if (matRow) { updateMaterialField(matRow.dataset.matRow, t.name, t.value); renderResults(); return; }
   }
   // อัปเดตช่องค่าแรง/ชม. ในตารางตั้งค่า โดยไม่สร้างตารางใหม่ (ไม่ให้โฟกัสหลุด)
   function refreshRates() {
@@ -832,6 +957,8 @@
     const t = event.target;
     if (t.id === "costSearch") { ui.search = t.value; renderProjectTable(); return; }
     if (t.closest("#tripForm")) previewTrip();
+    const matRow = t.closest("[data-mat-row]");
+    if (matRow) { updateMaterialField(matRow.dataset.matRow, t.name, t.value); return; }
   }
   function onSubmit(event) {
     if (event.target.id !== "tripForm") return;
@@ -870,5 +997,13 @@
     return (has(S.projectSale, key) && S.projectSale[key]) || (has(S.customerSale, customer.toUpperCase()) && S.customerSale[customer.toUpperCase()]) || "";
   };
   // ดัชนีต้นทุนออกแบบต่อแบบ (คีย์ = id ของแถวใน designs[] ซึ่งเป็นคีย์เดียวกับ designId ที่ใช้ทั่วระบบ) คำนวณสดทุกครั้งจากอัตรา/ค่าตั้งค่าปัจจุบัน ไม่ผูกกับช่วงเวลาที่เลือกในหน้านี้ (ใช้ทั้งอายุของแบบ)
-  window.CostEngine = { compute, splitTrip, evalTrip, resolveDate, resolveDates, workType, isRevision, makeCtx, DEFAULTS, getState: () => ({ S, trips, overrides, model }), designCostIndex: () => compute(designs, trips, S, overrides, null).itemsById };
+  window.CostEngine = {
+    compute, splitTrip, evalTrip, resolveDate, resolveDates, workType, isRevision, makeCtx, DEFAULTS, getState: () => ({ S, trips, overrides, model }), designCostIndex: () => compute(designs, trips, S, overrides, null).itemsById,
+    // ราคาวัตถุดิบปัจจุบัน (ราคากลาง แก้ไข/เพิ่มเองได้ที่หน้าต้นทุน > ตั้งค่า)
+    KEY_MATERIALS, materials: loadMaterials, getMaterialPrice: materialPriceFor,
+    // ค่าใช้จ่ายอื่นต่อ M/O ที่แผนกต่าง ๆ เพิ่มเองได้ (embed ผ่าน extraCostWidgetHtml)
+    KEY_EXTRA_COSTS, loadExtraCosts, extraCostsTotal: extraCostsTotalFor, allExtraCostsMap: loadExtraCostsAll,
+    extraCostWidgetHtml, addExtraCost: addExtraCostRow, removeExtraCost: removeExtraCostRow, updateExtraCost: updateExtraCostRow,
+    handleExtraCostClick, handleExtraCostFieldChange
+  };
 })();

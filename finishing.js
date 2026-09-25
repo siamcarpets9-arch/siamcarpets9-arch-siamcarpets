@@ -146,6 +146,13 @@
     if (!rec.extraCosts) rec.extraCosts = [];
     return rec;
   }
+  // ดึง "ราคาผ้าตาข่าย" จากราคาวัตถุดิบกลาง (หน้าต้นทุน) มาเติมให้ครั้งแรกที่ยังไม่เคยกรอก — แก้ไขทับได้เสมอ
+  function applyMeshPriceDefault(rec, dfin) {
+    if (has(rec.glue.meshPricePerM)) return;
+    const ce = CE();
+    const p = ce && ce.getMaterialPrice ? ce.getMaterialPrice("ผ้าตาข่าย") : null;
+    if (p != null) { rec.glue.meshPricePerM = p; saveDesignFinish(state.designId, dfin); }
+  }
 
   function areaBeforeGlue(rec) { return num(rec.glue.widthBeforeGlueM) * num(rec.glue.lengthBeforeGlueM); }
   function standardGlueKg(rec) { return areaBeforeGlue(rec) * 2; }
@@ -157,8 +164,12 @@
      ============================================================ */
   function readyFinishPieces() {
     const floor = WF().loadFloorAll();
+    const isSkipped = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.isSkipped ? OverviewEngine.isSkipped(id) : false;
+    const isSO = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.typeOf ? OverviewEngine.typeOf({ id }) === "SO" : false;
     const refs = [];
     Object.keys(floor).forEach((designId) => {
+      if (isSkipped(designId)) return;
+      if (isSO(designId)) return; // S/O ยังไม่นำมาใช้ในกระบวนการผลิตตอนนี้ (ซ่อนทั้งระบบ)
       const plan = WF().planFor(designId);
       if (!plan) return;
       const lines = WF().linesOf(designId, plan);
@@ -190,9 +201,11 @@
   function pieceJobPickerHtml() {
     const refs = readyFinishPieces();
     if (!refs.length) return `<p class="col-empty">ยังไม่มีชิ้นที่โอนจากแผนกทอ — ต้องทอครบ 100% แล้วกด “โอนให้แผนกทากาวตกแต่ง” ที่หน้า “แผนกทอ → หน้าจอทอ (ภาพรวม)” ก่อน</p>`;
-    return `<div class="pw-job-grid">${refs.map((r) => `<button type="button" class="pw-job-card dept-finishing ${state.designId === r.designId && state.lineIdx == r.lineIdx ? "active" : ""}" data-fnpick-design="${esc(r.designId)}" data-fnpick-line="${esc(r.lineIdx)}">
-      <strong>${esc(r.plan.moNo || r.designId)}</strong><span>${esc(r.line.location || `ชิ้นที่ ${Number(r.lineIdx) + 1}`)}</span><small>จอ ${esc(r.weavePiece.loomNo || "-")} · โอนแล้ว ${new Date(r.weavePiece.transferredToGlueAt).toLocaleDateString("th-TH")}</small>
-    </button>`).join("")}</div>`;
+    return `<div class="pw-job-grid">${refs.map((r) => `<div class="pw-job-card-wrap">
+      <button type="button" class="pw-job-card dept-finishing ${state.designId === r.designId && state.lineIdx == r.lineIdx ? "active" : ""}" data-fnpick-design="${esc(r.designId)}" data-fnpick-line="${esc(r.lineIdx)}">
+        <strong>${esc(r.plan.moNo || r.designId)}</strong><span>${esc(r.line.location || `ชิ้นที่ ${Number(r.lineIdx) + 1}`)}</span><small>จอ ${esc(r.weavePiece.loomNo || "-")} · โอนแล้ว ${new Date(r.weavePiece.transferredToGlueAt).toLocaleDateString("th-TH")}</small>
+      </button>${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(r.designId, r.plan.moNo || r.designId) : ""}
+    </div>`).join("")}</div>`;
   }
 
   function currentRef() {
@@ -206,6 +219,7 @@
     if (!ref) return `<p class="col-empty">เลือกชิ้นด้านบนก่อน</p>`;
     const dfin = ensureDesignFinish(state.designId);
     const rec = ensurePieceFinish(dfin, state.lineIdx);
+    applyMeshPriceDefault(rec, dfin);
     const area = areaBeforeGlue(rec), std = standardGlueKg(rec), actual = actualGlueKg(rec), variance = glueVariancePct(rec);
     return `
     <section class="department-panel pw-card">
@@ -370,6 +384,9 @@
       extraStaffCost += num(rec.transport.extraStaffCost);
       (rec.extraCosts || []).forEach((ec) => { extraCostTotal += num(ec.amount); extraLines.push(ec); });
     });
+    // ค่าใช้จ่ายอื่นต่อ M/O ที่แผนกต่าง ๆ เพิ่มเองได้ (วางแผน/ย้อม/ทอ/ปั๊ม ฯลฯ — เก็บกลางใน CostEngine แยกจาก extraCosts รายชิ้นด้านบน)
+    const sharedExtraCosts = (CE() && CE().loadExtraCosts) ? CE().loadExtraCosts(designId) : [];
+    sharedExtraCosts.forEach((ec) => { extraCostTotal += num(ec.amount); extraLines.push(ec); });
     const isDomestic = doc && doc.market === "DOMESTIC";
     const dcost = designCostFor(designId);
     const designCost = dcost ? dcost.cost : 0;
@@ -414,7 +431,7 @@
   function costRollupTableHtml() {
     const list = allCostRollups();
     return list.length ? `<table class="calc-table"><thead><tr><th>M/O</th><th>ตลาด</th><th class="num">ต้นทุนออกแบบ</th><th class="num">ค่าไหม/ย้อม</th><th class="num">ค่าแรงทอ+แต่ง</th><th class="num">ค่าผ้าตาข่าย+กาว</th><th class="num">ขนส่ง+พนักงานเพิ่ม</th><th class="num">อื่น ๆ</th><th class="num">รวมต้นทุน</th><th class="num">ต้นทุน/ตร.ม.</th><th class="num">ยอดขาย</th></tr></thead><tbody>${list.map(costRollupRowHtml).join("")}</tbody></table>
-    <p style="color:var(--muted);font-size:10px;margin:6px 2px 0">หมายเหตุ: ต้นทุนออกแบบคำนวณจากหน้า “ต้นทุน M/O” (เงินเดือน Designer ÷ ชั่วโมงทำงาน) เฉพาะ M/O ที่ผูกกับงานทำแบบจริงในทะเบียน Design เท่านั้น · ค่าแรงทอ+แต่งใช้สูตรเดียวกับหน้าใบวางแผนงาน (พื้นที่ × ค่าแรงเกรด + พื้นที่ × 400 บาท/ตร.ม. สำหรับแต่ง/ทากาว — สมมติฐานหน่วย ยังไม่ยืนยันกับฝ่ายบัญชี) · ค่าแรงแผนกเจาะลาย/ขยายลาย ยังไม่มีอัตราค่าจ้างยืนยัน จึงไม่รวมในยอดนี้ · ยอดขายเทียบสกุลเงินตามที่บันทึกในหน้ารายงานขาย (ต่างประเทศเป็น USD ในประเทศเป็น THB — ไม่ได้แปลงอัตราแลกเปลี่ยนให้)</p>` : `<p class="col-empty">ยังไม่มี M/O ที่บันทึกใบวางแผนงาน</p>`;
+    <p style="color:var(--muted);font-size:10px;margin:6px 2px 0">หมายเหตุ: ต้นทุนออกแบบคำนวณจากหน้า “ต้นทุน M/O” (เงินเดือน Designer ÷ ชั่วโมงทำงาน) เฉพาะ M/O ที่ผูกกับงานทำแบบจริงในทะเบียน Design เท่านั้น · ค่าแรงทอ+แต่งใช้สูตรเดียวกับหน้าใบวางแผนงาน (พื้นที่ × ค่าแรงเกรด + พื้นที่ × 400 บาท/ตร.ม. สำหรับแต่ง/ทากาว — สมมติฐานหน่วย ยังไม่ยืนยันกับฝ่ายบัญชี) · ค่าแรงแผนกเจาะลาย/ขยายลาย ยังไม่มีอัตราค่าจ้างยืนยัน จึงไม่รวมในยอดนี้ · คอลัมน์ “อื่น ๆ” รวมทั้งรายการต้นทุนอื่นที่กรอกไว้ในแท็บนี้ และรายการ “ค่าใช้จ่ายอื่นที่เกิดขึ้นกับ M/O นี้” ที่แผนกใดก็ได้ (วางแผน/ย้อม/ทอ/ปั๊ม) เพิ่มไว้ผ่านหน้าของตัวเอง · ค่าไหมในค่าไหม/ย้อมดึงราคาวัตถุดิบปัจจุบันจากหน้า “ต้นทุน” มาเป็นค่าเริ่มต้นให้อัตโนมัติ (แก้ไขเฉพาะออเดอร์ได้เสมอ) · ยอดขายเทียบสกุลเงินตามที่บันทึกในหน้ารายงานขาย (ต่างประเทศเป็น USD ในประเทศเป็น THB — ไม่ได้แปลงอัตราแลกเปลี่ยนให้)</p>` : `<p class="col-empty">ยังไม่มี M/O ที่บันทึกใบวางแผนงาน</p>`;
   }
 
   function costTabHtml() {
@@ -503,6 +520,17 @@
       if (expFw) { exportFinWorkersExcel(); return; }
       const pick = e.target.closest("[data-fnpick-design]");
       if (pick) { state.designId = pick.dataset.fnpickDesign; state.lineIdx = pick.dataset.fnpickLine; renderAll(); return; }
+      const moSkip = e.target.closest("[data-mo-skip]");
+      if (moSkip) {
+        if (typeof OverviewEngine === "undefined" || !OverviewEngine.setSkipped) return;
+        const designId = moSkip.dataset.moSkip;
+        if (!confirm(`ยืนยันกดผ่าน M/O,S/O "${moSkip.dataset.moSkipMono || designId}" — จะหายจากคิวงานของทุกแผนกทันที (ใช้เมื่องานนี้ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิตแล้วเท่านั้น)`)) return;
+        OverviewEngine.setSkipped(designId, moSkip.dataset.moSkipMono);
+        if (state.designId === designId) { state.designId = null; state.lineIdx = null; }
+        toast("กดผ่านแล้ว — ยกเลิกได้ที่หน้าภาพรวมการผลิต");
+        renderAll();
+        return;
+      }
 
       const issueMesh = e.target.closest("[data-issue-mesh]");
       if (issueMesh) {
@@ -625,7 +653,18 @@
       if (glueItemRow) {
         const dfin = ensureDesignFinish(state.designId);
         const rec = ensurePieceFinish(dfin, state.lineIdx);
-        rec.glue.glueItems[Number(glueItemRow.dataset.glueitem)][e.target.name] = e.target.value;
+        const idx = Number(glueItemRow.dataset.glueitem);
+        rec.glue.glueItems[idx][e.target.name] = e.target.value;
+        // พิมพ์ชื่อกาวแล้วยังไม่กรอกราคา — ลองดึงราคากลางจากหน้าต้นทุนมาเติมให้ (แก้ไขทับได้เสมอ)
+        if (e.target.name === "glueType" && !has(rec.glue.glueItems[idx].pricePerKg)) {
+          const ce = CE();
+          const p = ce && ce.getMaterialPrice ? ce.getMaterialPrice(e.target.value) : null;
+          if (p != null) {
+            rec.glue.glueItems[idx].pricePerKg = p;
+            const priceInput = glueItemRow.querySelector('input[name="pricePerKg"]');
+            if (priceInput) priceInput.value = p;
+          }
+        }
         saveDesignFinish(state.designId, dfin);
         return;
       }

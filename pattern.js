@@ -161,11 +161,15 @@
 
   function jobPickerHtml() {
     const plans = PE() ? PE().readJson(PE().KEY_PLANS, {}) : {};
-    const ready = designs.filter((d) => d.job === "OPENED" && plans[d.id] && plans[d.id].savedAt);
+    const isSkipped = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.isSkipped ? OverviewEngine.isSkipped(id) : false;
+    const typeOf = (d) => typeof OverviewEngine !== "undefined" && OverviewEngine.typeOf ? OverviewEngine.typeOf(d) : "MO";
+    const ready = designs.filter((d) => d.job === "OPENED" && plans[d.id] && plans[d.id].savedAt && !isSkipped(d.id) && typeOf(d) !== "SO");
     if (!ready.length) return `<p class="col-empty">ยังไม่มี Job ที่ Planning บันทึกแผน (ทำใบวางแผนงานให้เสร็จก่อน)</p>`;
-    return `<div class="pw-job-grid">${ready.map((d) => `<button type="button" class="pw-job-card dept-pattern ${state.designId === d.id ? "active" : ""}" data-ppick="${esc(d.id)}">
-      <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
-    </button>`).join("")}</div>`;
+    return `<div class="pw-job-grid">${ready.map((d) => `<div class="pw-job-card-wrap">
+      <button type="button" class="pw-job-card dept-pattern ${state.designId === d.id ? "active" : ""}" data-ppick="${esc(d.id)}">
+        <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
+      </button>${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(d.id, d.id) : ""}
+    </div>`).join("")}</div>`;
   }
 
   function rosterCardHtml() {
@@ -279,7 +283,9 @@
         </div>
         <p style="color:var(--muted);font-size:10px;margin:6px 2px 0">เมื่อออกใบเบิกกับ Store แล้ว ให้ไปติ๊ก “ผ้าใบสำหรับทอพร้อมแล้ว” ในหน้า “ส่งแผนกทอ” เพื่อยืนยันครบวัตถุดิบก่อนแผนกทอขึ้นทอ</p>
       </div>
-    </section>`;
+    </section>
+
+    ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(state.designId, "pattern") : ""}`;
   }
 
   function build() {
@@ -356,6 +362,18 @@
       }
       const expW = e.target.closest("[data-export-pattern-workers]");
       if (expW) { exportPatternWorkersExcel(); return; }
+      const moSkip = e.target.closest("[data-mo-skip]");
+      if (moSkip) {
+        if (typeof OverviewEngine === "undefined" || !OverviewEngine.setSkipped) return;
+        const designId = moSkip.dataset.moSkip;
+        if (!confirm(`ยืนยันกดผ่าน M/O,S/O "${moSkip.dataset.moSkipMono || designId}" — จะหายจากคิวงานของทุกแผนกทันที (ใช้เมื่องานนี้ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิตแล้วเท่านั้น)`)) return;
+        OverviewEngine.setSkipped(designId, moSkip.dataset.moSkipMono);
+        if (state.designId === designId) state.designId = null;
+        toast("กดผ่านแล้ว — ยกเลิกได้ที่หน้าภาพรวมการผลิต");
+        renderAll();
+        return;
+      }
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
     });
     root.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && e.target && e.target.id === "ppNewWorkerName") {
@@ -367,6 +385,7 @@
       }
     });
     root.addEventListener("input", (e) => {
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange && CostEngine.handleExtraCostFieldChange(e)) return;
       if (!e.target.name) return;
       saveField(e.target.name, e.target.value);
     });

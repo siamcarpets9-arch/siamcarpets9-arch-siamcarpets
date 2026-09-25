@@ -33,6 +33,9 @@
 .pw-job-card small{color:var(--muted);font-size:9px}
 .pw-job-card.active{border-color:var(--teal);box-shadow:inset 0 0 0 1px var(--teal)}
 .pw-job-card .status-tag{margin-top:2px}
+.pw-job-card-wrap{position:relative;width:100%}
+.pw-job-card-wrap .pw-job-card{width:100%}
+.pw-job-card-wrap .ovw-skip-btn{position:absolute;top:6px;right:6px;margin-left:0;background:#fff}
 
 /* ตารางโซนสี */
 .pw-zone-scroll,.pw-pot-scroll,.pw-sched-scroll{overflow:auto;margin-bottom:8px}
@@ -168,3 +171,40 @@
 .pw-job-card.dept-weaving{border-left-color:#13848a}
 .pw-job-card.dept-finishing{border-left-color:#d39a2f}
 .pw-job-card.dept-done{border-left-color:#438b79}
+
+/* ============ พิมพ์ใบสั่งย้อมในแอป (overlay เต็มจอ) — ตามแบบ #shipPrint ============ */
+#pwPrint{position:fixed;inset:0;z-index:100;background:#3b4a4d;display:flex;flex-direction:column}
+#pwPrint[hidden]{display:none!important}
+.pw-print-bar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#16363a;color:#fff;flex-wrap:wrap}
+.pw-print-spacer{flex:1}
+.pw-print-tip{font-size:9px;color:#9fb8b8}
+.pw-print-bar button{border:1px solid #ffffff55;background:transparent;color:#fff;padding:7px 14px;font:inherit;font-size:11px;font-weight:900;cursor:pointer}
+.pw-print-bar button:hover{background:#ffffff22}
+.pw-print-bar button.primary{background:var(--gold,#d8a83c);border-color:var(--gold,#d8a83c);color:#16363a}
+.pw-print-scroll{flex:1;overflow:auto;padding:18px}
+.pw-print-sheet{width:210mm;min-height:148mm;background:#fff;box-shadow:0 6px 24px #0007;padding:12mm 14mm;box-sizing:border-box;font-size:11px;color:#111;margin:0 auto 16px}
+.pw-print-title{text-align:center;font-weight:900;font-size:16px;border-bottom:2px solid #16363a;padding-bottom:10px;margin-bottom:12px}
+.pw-print-meta{display:grid;grid-template-columns:repeat(2,1fr);gap:4px 20px;margin-bottom:12px;font-size:11px}
+.pw-print-meta b{color:#16363a}
+.pw-print-table{width:100%;border-collapse:collapse;margin-bottom:12px}
+.pw-print-table th{background:#16363a;color:#fff;padding:6px;font-size:10px;text-align:left}
+.pw-print-table td{padding:6px;border:1px solid #d6dedd;font-size:10.5px}
+.pw-print-sign{display:flex;justify-content:space-between;margin-top:26px;font-size:10.5px}
+.pw-print-sign div{width:45%;text-align:center;border-top:1px solid #111;padding-top:6px}
+
+@media print{
+  html,body{background:#fff!important;margin:0!important;padding:0!important;height:auto!important;overflow:visible!important}
+  body.pw-printing>*:not(#pwPrint){display:none!important}
+  #pwPrint{position:static!important;display:block!important;background:#fff!important;inset:auto}
+  .pw-print-bar{display:none!important}
+  .pw-print-scroll{overflow:visible!important;padding:0!important;display:block!important}
+  .pw-print-sheet{width:auto!important;min-height:auto!important;box-shadow:none!important;margin:0!important;break-after:page;page-break-after:always}
+  .pw-print-sheet:last-child{break-after:auto;page-break-after:auto}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+
+/* ============ หน้า "ใบสั่งย้อมรวม" (dye-combined.js) ============ */
+.dc-group{border:1px solid var(--line);background:#fbfdfc;padding:10px 11px;margin-bottom:10px;font-size:11px;color:var(--ink)}
+.dc-group summary{font-size:11px}
+.dc-group .pw-body{padding-top:8px}
+.dc-card{margin-bottom:12px}

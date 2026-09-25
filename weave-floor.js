@@ -189,7 +189,10 @@
      ============================================================ */
   function readyDesigns() {
     const plans = PE().readJson(PE().KEY_PLANS, {});
+    const isSkipped = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.isSkipped ? OverviewEngine.isSkipped(id) : false;
     return designs.filter((d) => {
+      if (isSkipped(d.id)) return false;
+      if (typeOfDesign(d.id) === "SO") return false; // S/O ยังไม่นำมาใช้ในกระบวนการผลิตตอนนี้ (ซ่อนทั้งระบบ)
       const plan = plans[d.id];
       if (!plan || !plan.savedAt) return false;
       const issue = issueRecOf(d.id);
@@ -328,9 +331,11 @@
     const ready = readyDesigns();
     if (!ready.length) return `<p class="col-empty">ยังไม่มี M/O ที่ผ้าใบพร้อม (ต้องติ๊ก “ผ้าใบสำหรับทอพร้อมแล้ว” ในหน้า “ส่งแผนกทอ” ก่อน — ไม่ต้องรอไหมครบทุกสี)</p>`;
     const plans = PE().readJson(PE().KEY_PLANS, {});
-    return `<div class="pw-job-grid">${ready.map((d) => `<button type="button" class="pw-job-card dept-weaving ${state.designId === d.id ? "active" : ""}" data-${pickAttr}="${esc(d.id)}">
-      <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
-    </button>`).join("")}</div>`;
+    return `<div class="pw-job-grid">${ready.map((d) => `<div class="pw-job-card-wrap">
+      <button type="button" class="pw-job-card dept-weaving ${state.designId === d.id ? "active" : ""}" data-${pickAttr}="${esc(d.id)}">
+        <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
+      </button>${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(d.id, d.id) : ""}
+    </div>`).join("")}</div>`;
   }
 
   /* ---------------- Tab 1: ตั้งค่าขึ้นทอ ---------------- */
@@ -509,7 +514,9 @@
         <div class="pw-save-bar"><button type="button" class="action-button primary" data-add-qc>บันทึก QC</button></div>
         ${qcRowsHtml(state.designId, state.lineIdx)}
       </div>
-    </section>`;
+    </section>
+
+    ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(state.designId, "weavefloor") : ""}`;
   }
 
   /* ---------------- Tab 3: หน้าจอทอ (ภาพรวม) ---------------- */
@@ -957,6 +964,18 @@
       if (pick) { state.designId = pick.dataset.wfpick; state.lineIdx = null; renderAll(); return; }
       const lpick = e.target.closest("[data-lpick]");
       if (lpick) { state.lineIdx = lpick.dataset.lpick; renderAll(); return; }
+      const moSkip = e.target.closest("[data-mo-skip]");
+      if (moSkip) {
+        if (typeof OverviewEngine === "undefined" || !OverviewEngine.setSkipped) return;
+        const designId = moSkip.dataset.moSkip;
+        if (!confirm(`ยืนยันกดผ่าน M/O,S/O "${moSkip.dataset.moSkipMono || designId}" — จะหายจากคิวงานของทุกแผนกทันที (ใช้เมื่องานนี้ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิตแล้วเท่านั้น)`)) return;
+        OverviewEngine.setSkipped(designId, moSkip.dataset.moSkipMono);
+        if (state.designId === designId) { state.designId = null; state.lineIdx = null; }
+        toast("กดผ่านแล้ว — ยกเลิกได้ที่หน้าภาพรวมการผลิต");
+        renderAll();
+        return;
+      }
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
       const gotoDaily = e.target.closest("[data-goto-daily]");
       if (gotoDaily) {
         state.designId = gotoDaily.dataset.gotoDaily;
@@ -1124,6 +1143,7 @@
     });
 
     root.addEventListener("input", (e) => {
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange && CostEngine.handleExtraCostFieldChange(e)) return;
       const gunRow = e.target.closest("[data-gun]");
       if (gunRow && (e.target.name === "technician" || e.target.name === "reason")) {
         const dfloor = ensureDesignFloor(state.designId);

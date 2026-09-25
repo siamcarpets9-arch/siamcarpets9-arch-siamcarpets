@@ -22,6 +22,35 @@
   const KEY_ISSUES = "siam-weaving-issues";
   const KEY_FLOOR = "siam-weave-floor";
   const KEY_FINISH = "siam-finishing";
+  const KEY_SKIP = "siam-mo-skipped"; // { [designId]: { at: iso, moNo } } — M/O,S/O ที่ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิต กดผ่านครั้งเดียวหายจากคิวงานทุกแผนกทันที
+
+  /* ============================================================
+     M/O,S/O ที่กด "ผ่าน" (ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิต) — global flag เดียว ผูกกับ designId
+     ทุกหน้า (ภาพรวม/วางแผน/ย้อม/ทอ/ปั๊ม/ตกแต่ง) เช็คค่านี้เพื่อซ่อนออกจากคิวงานค้างพร้อมกันทันที
+     ============================================================ */
+  function loadSkipped() { const v = readJson(KEY_SKIP, {}); return v && typeof v === "object" ? v : {}; }
+  function saveSkipped(v) { try { localStorage.setItem(KEY_SKIP, JSON.stringify(v)); } catch (e) { /* ยังใช้ต่อได้ */ } }
+  function isSkipped(designId) { return Boolean(loadSkipped()[designId]); }
+  function setSkipped(designId, moNo) {
+    const all = loadSkipped();
+    all[designId] = { at: new Date().toISOString(), moNo: moNo || "" };
+    saveSkipped(all);
+  }
+  function unsetSkipped(designId) {
+    const all = loadSkipped();
+    delete all[designId];
+    saveSkipped(all);
+  }
+  function skippedList() {
+    const all = loadSkipped();
+    const byId = new Map((typeof designs !== "undefined" ? designs : []).map((d) => [d.id, d]));
+    return Object.keys(all).map((id) => ({ designId: id, at: all[id].at, moNo: all[id].moNo, design: byId.get(id) || null }))
+      .sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  }
+  // ปุ่ม "ผ่าน" ใช้ปุ่มเดียวกันได้ทั้งจากหน้าภาพรวมและจากคิวงานของทุกแผนก
+  function skipButtonHtml(designId, moNo) {
+    return `<button type="button" class="ovw-skip-btn" data-mo-skip="${esc(designId)}" data-mo-skip-mono="${esc(moNo || "")}" title="M/O,S/O นี้ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิต — กดผ่านโดยไม่ต้องกรอกรายละเอียด">ผ่าน</button>`;
+  }
 
   const DEPTS = {
     planning: { label: "วางแผนการผลิต", short: "วางแผน", view: "planwork", color: "#c79735" },
@@ -37,7 +66,9 @@
 
   function jobs() {
     // sample:true = ข้อมูลตัวอย่างของระบบ (ไม่ใช่งานจริงของบริษัท) ไม่ควรปนกับภาพรวมการผลิตจริง
-    return (typeof designs !== "undefined" ? designs : []).filter((d) => d.job === "OPENED" && !d.sample);
+    // กดผ่านแล้ว = ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิต ไม่ต้องแสดงในภาพรวม/คิวงานอีก
+    // S/O ยังไม่นำมาใช้ในกระบวนการผลิตตอนนี้ (ซ่อนทั้งระบบ) — เอาออกจากทุกที่ที่เรียก jobs()
+    return (typeof designs !== "undefined" ? designs : []).filter((d) => d.job === "OPENED" && !d.sample && !isSkipped(d.id) && typeOf(d) !== "SO");
   }
 
   // เลข M/O,S/O มาจากหลายแหล่ง พิมพ์ตัวคั่นปีไม่เหมือนกัน ("148/26","TH123.26","TH 123-26") และบางรายการเก่ามีคำว่า
@@ -326,7 +357,7 @@
       <td>${badge(st.dept, st.state)}<br><small class="ovw-dept-label">${esc(meta.label)}</small></td>
       <td>${d.weaveLocation ? `<span class="ovw-weaveloc ${d.weaveLocation === "SIAM" ? "ovw-weaveloc-in" : "ovw-weaveloc-out"}">${esc(d.weaveLocation === "SIAM" ? "ทอเอง" : d.weaveLocation)}</span>` : "-"}</td>
       <td>${stateTag(st.state, st.stateLabel)}${st.source === "import" ? `<small class="ovw-src">${d.importSource === "MASTER PLAN 17-9-26" ? "ตาม MASTER PLAN 17 ก.ย." : "ตามข้อมูลนำเข้า 22 ก.ย."}</small>` : st.source === "live" ? '<small class="ovw-src ovw-src-live">อัปเดตจากระบบนี้</small>' : ""}</td>
-      <td><button type="button" class="action-button ovw-goto" data-view="${meta.view}">ไปที่หน้า ${esc(meta.short)}</button></td>
+      <td><button type="button" class="action-button ovw-goto" data-view="${meta.view}">ไปที่หน้า ${esc(meta.short)}</button>${skipButtonHtml(d.id, d.id)}</td>
     </tr>`;
   }
 
@@ -361,6 +392,7 @@
       <td>${badge(st.dept, st.state)}</td>
       <td>${stateTag(st.state, st.stateLabel)}</td>
       <td class="num">${fmt(sqmOfDesign(d.id), 2)}</td>
+      <td>${skipButtonHtml(d.id, d.id)}</td>
     </tr>`;
   }
 
@@ -461,12 +493,13 @@
       return `<div class="ovw-month-week">
         <div class="ovw-month-week-head"><strong>สัปดาห์ที่ ${i + 1}</strong><span>${shortDate(wk.start)} – ${shortDate(wk.end)}</span><span>${weekRows.length} รายการ · ${fmt(weekSqm, 2)} ตร.ม.</span></div>
         ${weekRows.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>กำหนดส่ง</th><th>ประเภท</th><th>เลขที่</th><th>ลูกค้า</th><th>Project / PO</th><th>แผนกปัจจุบัน</th><th>สถานะ</th><th class="num">ตร.ม.</th></tr></thead>
+          <thead><tr><th>กำหนดส่ง</th><th>ประเภท</th><th>เลขที่</th><th>ลูกค้า</th><th>Project / PO</th><th>แผนกปัจจุบัน</th><th>สถานะ</th><th class="num">ตร.ม.</th><th></th></tr></thead>
           <tbody>${weekRows.map((r) => monthRowHtml(r, r.dueDate)).join("")}</tbody>
         </table></div>` : `<p class="col-empty">ไม่มีงานกำหนดส่งสัปดาห์นี้</p>`}
       </div>`;
     }).join("");
     const monthLabel = `${monthNames[targetMonth]} ${targetYear + 543}`;
+    const skippedRows = skippedList();
 
     host.dataset.typeFilter = typeFilter;
     host.dataset.pageMode = pageMode;
@@ -554,6 +587,22 @@
         <div class="panel-heading"><div><strong>คำขอไหมเพิ่มจากแผนกทอ (รอออกใบสั่งย้อม)</strong><small>เกิดจากแผนกทอแจ้งว่าไหมสีใดไม่พอ — ยืนยันผู้อนุมัติและออกใบสั่งย้อมเพิ่มได้ที่หน้า "แผนกทอ" แท็บ "สรุป/ส่งออก/แจ้งเตือน"</small></div></div>
         <div class="pw-body" id="planningYarnRequests"></div>
       </section>
+
+      <details class="ovw-skipped-panel">
+        <summary><strong>M/O,S/O ที่กดผ่านแล้ว</strong><span>${skippedRows.length} รายการ — ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิต จึงไม่แสดงในคิวงานของทุกแผนก</span></summary>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>เลขที่</th><th>ลูกค้า</th><th>Project / PO</th><th>กดผ่านเมื่อ</th><th></th></tr></thead>
+            <tbody>${skippedRows.length ? skippedRows.map((r) => `<tr>
+              <td><strong>${esc(r.moNo || r.designId)}</strong></td>
+              <td>${esc(r.design ? r.design.customer || "-" : "-")}</td>
+              <td>${esc(r.design ? r.design.project || "-" : "-")}</td>
+              <td>${r.at ? new Date(r.at).toLocaleString("th-TH") : "-"}</td>
+              <td><button type="button" class="text-button" data-mo-unskip="${esc(r.designId)}">ยกเลิกผ่าน</button></td>
+            </tr>`).join("") : `<tr><td colspan="5" class="col-empty">ยังไม่มีรายการที่กดผ่าน</td></tr>`}</tbody>
+          </table>
+        </div>
+      </details>
     `;
 
     const searchEl = document.getElementById("ovwSearch");
@@ -592,6 +641,22 @@
     host.querySelectorAll(".ovw-goto").forEach((btn) => {
       btn.addEventListener("click", () => { if (typeof setView === "function") setView(btn.dataset.view); });
     });
+    host.querySelectorAll("[data-mo-skip]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const designId = btn.dataset.moSkip;
+        if (!confirm(`ยืนยันกดผ่าน M/O,S/O "${btn.dataset.moSkipMono || designId}" — จะหายจากคิวงานของทุกแผนกทันที (ใช้เมื่องานนี้ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิตแล้วเท่านั้น)`)) return;
+        setSkipped(designId, btn.dataset.moSkipMono);
+        toast("กดผ่านแล้ว — ยกเลิกได้ที่ท้ายหน้านี้ในส่วน \"M/O,S/O ที่กดผ่านแล้ว\"");
+        renderOverview();
+      });
+    });
+    host.querySelectorAll("[data-mo-unskip]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        unsetSkipped(btn.dataset.moUnskip);
+        toast("ยกเลิกผ่านแล้ว — กลับเข้าคิวงานตามปกติ");
+        renderOverview();
+      });
+    });
 
     if (typeof renderPlanningYarnRequests === "function") renderPlanningYarnRequests();
   }
@@ -599,5 +664,9 @@
   window.renderOverview = renderOverview;
   // ให้หน้าอื่น (เช่น Store ในหน้า QC Dashboard) เรียกใช้ตรรกะ "งานไหนเสร็จแล้ว/อยู่แผนกไหน" ชุดเดียวกัน
   // แทนที่จะเขียนซ้ำ กันข้อมูลเพี้ยนถ้าตรรกะสองที่ไม่ตรงกัน
-  window.OverviewEngine = { jobs, statusOf, typeOf, shipDateOf, docForDesign, DEPTS };
+  window.OverviewEngine = {
+    jobs, statusOf, typeOf, shipDateOf, docForDesign, DEPTS,
+    // M/O,S/O ที่กด "ผ่าน" (ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิต) — ใช้ร่วมกันได้ทุกแผนกเพื่อซ่อนจากคิวงานพร้อมกันทันที
+    isSkipped, setSkipped, unsetSkipped, skippedList, skipButtonHtml
+  };
 })();

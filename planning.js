@@ -325,6 +325,10 @@
     { value: "package", label: "Package" },
     { value: "other", label: "อื่น ๆ" }
   ];
+  // เกณฑ์ย้อมในบริษัท — ถ้าน้ำหนักไหมสุทธิของหม้อย้อมเกินนี้ ให้แนะนำส่งจ้างย้อมภายนอกแทน (ค่าเริ่มต้น 20 กก. แก้ไขเพิ่มเติมได้)
+  const KEY_DYE_CAP = "siam-dye-inhouse-cap-kg";
+  function loadDyeCapKg() { const v = readJson(KEY_DYE_CAP, null); return typeof v === "number" && v > 0 ? v : 20; }
+  function saveDyeCapKg(v) { const n = num(v); writeJson(KEY_DYE_CAP, n > 0 ? n : 20); }
   function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
   function isoToDate(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "")); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; }
   function blankDyeOrder(dyeSeg) {
@@ -358,8 +362,11 @@
     potKeyOf, potLabelOf, computeZone, computeDyePlan, zoneMixComponents, blankMixRow,
     deptDays, dateToOffset, offsetToDate, fmtThaiDate, computeSchedule, laborCost,
     DYE_METHODS, isoDate, isoToDate, blankDyeOrder, dyeOrderCost,
+    KEY_DYE_CAP, dyeInhouseCapKg: loadDyeCapKg, setDyeInhouseCapKg: saveDyeCapKg,
     blankWeaveOutsource, weaveOutsourceCost,
-    KEY_PRESETS, KEY_WORKERS, KEY_PLANS, readJson, writeJson
+    KEY_PRESETS, KEY_WORKERS, KEY_PLANS, readJson, writeJson,
+    // ใช้ร่วมกับหน้า "ใบสั่งย้อมรวม" (dye-combined.js) — พิมพ์ PDF ด้วย overlay เดียวกัน + ต่อยอดสูตรต้นทุนใบสั่งย้อมเดียวกัน
+    showPrintSheets, closePrintSheets: closeDyePrint
   };
 
   /* ============================================================
@@ -512,7 +519,7 @@
     return { row, moNo, totalAreaSqm };
   }
 
-  const state = { designId: null, plan: null, editGrades: false, photoAnalysis: null, photoAnalyzing: false };
+  const state = { designId: null, plan: null, editGrades: false, photoAnalysis: null, photoAnalyzing: false, dyeCostOpen: {} };
 
   function ensurePlan(designId) {
     const all = loadPlans();
@@ -527,15 +534,20 @@
 
   function jobPickerHtml() {
     // sample:true = ข้อมูลตัวอย่างของระบบ (ไม่ใช่งานจริงของบริษัท) ไม่ควรปนกับคิว Planning จริง
-    const opened = designs.filter((d) => d.job === "OPENED" && !d.sample);
+    // กดผ่านแล้ว (M/O,S/O ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิต) = ไม่ต้องแสดงในคิว Planning อีก
+    const isSkipped = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.isSkipped ? OverviewEngine.isSkipped(id) : false;
+    const typeOf = (d) => typeof OverviewEngine !== "undefined" && OverviewEngine.typeOf ? OverviewEngine.typeOf(d) : "MO";
+    const opened = designs.filter((d) => d.job === "OPENED" && !d.sample && !isSkipped(d.id) && typeOf(d) !== "SO");
     const plans = loadPlans();
     if (!opened.length) return `<p class="col-empty">ยังไม่มี Job ที่ฝ่ายขายส่งมา Planning</p>`;
     return `<div class="pw-job-grid">${opened.map((d) => {
       const has_plan = Boolean(plans[d.id] && plans[d.id].savedAt);
-      return `<button type="button" class="pw-job-card dept-planning ${state.designId === d.id ? "active" : ""}" data-pick="${esc(d.id)}">
-        <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(d.moNo || "ยังไม่มีเลข M/O")}</small>
-        ${tag(has_plan ? "วางแผนแล้ว" : "รอวางแผน", has_plan ? "" : "review")}
-      </button>`;
+      return `<div class="pw-job-card-wrap">
+        <button type="button" class="pw-job-card dept-planning ${state.designId === d.id ? "active" : ""}" data-pick="${esc(d.id)}">
+          <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(d.moNo || "ยังไม่มีเลข M/O")}</small>
+          ${tag(has_plan ? "วางแผนแล้ว" : "รอวางแผน", has_plan ? "" : "review")}
+        </button>${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(d.id, d.id) : ""}
+      </div>`;
     }).join("")}</div>`;
   }
 
@@ -642,17 +654,27 @@
     const seen = new Set();
     pots.forEach((pot) => {
       seen.add(pot.key);
-      if (!p.dyeOrders[pot.key]) p.dyeOrders[pot.key] = blankDyeOrder(dyeSeg);
+      const isNew = !p.dyeOrders[pot.key];
+      if (isNew) p.dyeOrders[pot.key] = blankDyeOrder(dyeSeg);
       const o = p.dyeOrders[pot.key];
+      // ใบสั่งย้อมใหม่ — ลองดึง "ราคาวัตถุดิบปัจจุบัน" (หน้าต้นทุน) มาเติมราคาไหมให้อัตโนมัติตามชนิดไหมของโซน ยังแก้ไขทับต่อออเดอร์ได้เสมอ
+      if (isNew) {
+        const yarnCode = (pot.zones && pot.zones[0] && pot.zones[0].yarnCode) || "";
+        const price = typeof CostEngine !== "undefined" && CostEngine.getMaterialPrice ? CostEngine.getMaterialPrice(yarnCode) : null;
+        if (price != null) o.yarnPricePerKg = price;
+        // เกินเกณฑ์ย้อมในบริษัท (ค่าเริ่มต้น 20 กก./หม้อ แก้ไขได้) — แนะนำส่งจ้างย้อมภายนอกให้อัตโนมัติตอนสร้างใบสั่งย้อมใหม่ ยังสลับกลับเองได้เสมอ
+        if (num(pot.netKg) > loadDyeCapKg()) o.source = "outsource";
+      }
       if (o.issueDateAuto !== false) o.issueDate = isoDate(offsetToDate(dyeSeg.start));
       if (o.needDateAuto !== false) o.needDate = isoDate(offsetToDate(dyeSeg.end));
     });
     return pots.map((pot) => ({ pot, order: p.dyeOrders[pot.key] }));
   }
 
-  function dyeOrderCardHtml(pot, order, dyeSeg) {
+  function dyeOrderCardHtml(pot, order, dyeSeg, capKg) {
     const cost = dyeOrderCost(order, pot.netKg);
     const isOut = order.source === "outsource";
+    const overCap = !isOut && typeof capKg === "number" && capKg > 0 && num(pot.netKg) > capKg;
     const issueMismatch = !order.issueDateAuto && order.issueDate !== isoDate(offsetToDate(dyeSeg.start));
     const needMismatch = !order.needDateAuto && order.needDate !== isoDate(offsetToDate(dyeSeg.end));
     const firstZone = pot.zones[0] || {};
@@ -663,6 +685,7 @@
       </div>
       <div class="pw-dye-grid">
         <label class="pf">แหล่งย้อม<select name="source">${[["inhouse", "ย้อมภายในบริษัท"], ["outsource", "จ้างย้อมบริษัทอื่น"]].map(([v, t]) => `<option value="${v}" ${order.source === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+        ${overCap ? `<span class="pw-dye-warn">⚠ หม้อนี้ ${fmt(pot.netKg, 3)} กก. เกินเกณฑ์ย้อมในบริษัท (${fmt(capKg, 1)} กก.) — ควรสลับเป็น "จ้างย้อมบริษัทอื่น"</span>` : ""}
         ${isOut ? field("ชื่อผู้รับจ้างย้อม", inp("vendor", order.vendor, 'inputmode="text"')) : ""}
         ${field("Yarn Lot", inp("lot", order.lot, 'inputmode="text"'))}
         <label class="pf">วิธีย้อม<select name="method">${DYE_METHODS.map((m) => `<option value="${m.value}" ${order.method === m.value ? "selected" : ""}>${m.label}</option>`).join("")}</select></label>
@@ -673,10 +696,13 @@
         <label><input type="checkbox" name="twist" ${order.twist ? "checked" : ""}> ต้องทวิสไหม</label>
         <label><input type="checkbox" name="ply" ${order.ply ? "checked" : ""}> ต้องควบไหม</label>
       </div>
-      ${isOut ? `<details class="pw-dye-cost-detail"><summary>รายละเอียดต้นทุนจ้างย้อม (ราคาไหม/ค่าจ้าง/surcharge/EPZ)</summary><div class="pw-dye-grid">
+      ${isOut ? `<details class="pw-dye-cost-detail" ${state.dyeCostOpen && state.dyeCostOpen[pot.key] ? "open" : ""}><summary>รายละเอียดต้นทุนจ้างย้อม (ราคาไหม/ค่าจ้าง/surcharge/EPZ)</summary><div class="pw-dye-grid">
         <label class="pf tiny">ค่าจ้างย้อม (บาท/กก.)${inp("serviceFeePerKg", order.serviceFeePerKg, 'class="pw-num"')}</label>
         <label class="pf"><input type="checkbox" name="buyYarn" ${order.buyYarn ? "checked" : ""}> บริษัทซื้อไหมเอง</label>
-        ${order.buyYarn ? field("ราคาไหม (บาท/กก.)", inp("yarnPricePerKg", order.yarnPricePerKg, 'class="pw-num"')) : ""}
+        ${order.buyYarn ? (() => {
+          const masterPrice = typeof CostEngine !== "undefined" && CostEngine.getMaterialPrice ? CostEngine.getMaterialPrice(firstZone.yarnCode) : null;
+          return `<span class="pw-colorcode-row">${field("ราคาไหม (บาท/กก.)", inp("yarnPricePerKg", order.yarnPricePerKg, 'class="pw-num"'))}${masterPrice != null ? `<button type="button" class="text-button" data-use-material-price="${esc(pot.key)}" data-material-price-value="${masterPrice}" title="ราคากลางของ ${esc(firstZone.yarnCode)} จากหน้าต้นทุน">ใช้ราคากลาง (${fmt(masterPrice, 0)})</button>` : ""}</span>`;
+        })() : ""}
         <label class="pf"><input type="checkbox" name="special" ${order.special ? "checked" : ""}> ไหมชนิดพิเศษ (surcharge)</label>
         ${order.special ? field("Surcharge (%)", inp("surchargePct", order.surchargePct, 'class="pw-num"')) : ""}
         ${order.ply ? field("ค่าควบ (บาท/กก.)", inp("plyCostPerKg", order.plyCostPerKg, 'class="pw-num"')) : ""}
@@ -691,8 +717,91 @@
         ${issueMismatch || needMismatch ? `<span class="pw-dye-warn">⚠ ไม่ตรงกับ Master Plan (สั่งย้อม ${fmtThaiDate(offsetToDate(dyeSeg.start))} – ${fmtThaiDate(offsetToDate(dyeSeg.end))})</span>` : ""}
       </div>
       ${isOut ? `<div class="pw-dye-cost">รวมค่าใช้จ่าย: <strong>${fmt(cost.total, 0)} บาท</strong><small> (ไหม ${fmt(cost.yarnCost, 0)} + ค่าจ้างย้อม ${fmt(cost.serviceCost, 0)} + surcharge ${fmt(cost.surcharge, 0)} + กรอ/ทวิส/ควบ ${fmt(cost.windCost + cost.twistCost + cost.plyCost, 0)} + hank ${fmt(cost.hankCost, 0)} + EPZ ${fmt(cost.epzTax, 0)})</small></div>` : `<div class="pw-dye-cost muted">ย้อมภายในบริษัท — ไม่คิดค่าจ้างย้อม/surcharge ภายนอก</div>`}
+      <div class="pw-row"><button type="button" class="text-button" data-print-dye="${esc(pot.key)}">🖨 พิมพ์ใบสั่งย้อม (PDF)</button></div>
     </div>`;
   }
+
+  /* ============================================================
+     พิมพ์ใบสั่งย้อมเป็น PDF (window.print + overlay ตามแบบ #shipPrint ในหน้าใบส่งสินค้า)
+     ============================================================ */
+  function printInfoForPot(p, potKey) {
+    const dye = computeDyePlan(p.zones, num(p.totalAreaSqm), p.bufferPct);
+    const pot = dye.pots.find((x) => x.key === potKey);
+    const order = p.dyeOrders[potKey];
+    return pot && order ? { pot, order } : null;
+  }
+  function buildDyeOrderPrintSheetHtml(p, pot, order) {
+    const cost = dyeOrderCost(order, pot.netKg);
+    const isOut = order.source === "outsource";
+    const firstZone = pot.zones[0] || {};
+    const info = designs.find((d) => d.id === p.designId) || {};
+    const methodLabel = (DYE_METHODS.find((m) => m.value === order.method) || {}).label || order.method;
+    return `<div class="pw-print-sheet">
+      <div class="pw-print-title">ใบสั่งย้อม (Dye Order)</div>
+      <div class="pw-print-meta">
+        <div><b>M/O:</b> ${esc(p.moNo || p.designId)}</div>
+        <div><b>วันที่พิมพ์:</b> ${new Date().toLocaleDateString("th-TH")}</div>
+        <div><b>ลูกค้า:</b> ${esc(info.customer || "-")}</div>
+        <div><b>โปรเจกต์:</b> ${esc(info.project || "-")}</div>
+        <div><b>หม้อย้อม/โซนสี:</b> ${esc(pot.label)}</div>
+        <div><b>Yarn Code:</b> ${esc(firstZone.yarnCode || "-")} · Tex ${esc(firstZone.Tex || "-")}</div>
+        <div><b>น้ำหนักไหมสุทธิ:</b> ${fmt(pot.netKg, 3)} กก.</div>
+        <div><b>แหล่งย้อม:</b> ${isOut ? "จ้างย้อมบริษัทอื่น" : "ย้อมภายในบริษัท"}${isOut && order.vendor ? " — " + esc(order.vendor) : ""}</div>
+        <div><b>วิธีย้อม:</b> ${esc(order.method === "other" ? order.methodOther : methodLabel)}</div>
+        <div><b>Yarn Lot:</b> ${esc(order.lot || "-")}</div>
+        <div><b>วันที่เปิดใบสั่ง:</b> ${esc(order.issueDate)}</div>
+        <div><b>วันที่ต้องการไหม:</b> ${esc(order.needDate)}</div>
+      </div>
+      ${(order.rewind || order.twist || order.ply) ? `<p style="margin:0 0 10px"><b>หมายเหตุ:</b> ${[order.rewind ? "ต้องกรอไหม" : "", order.twist ? "ต้องทวิสไหม" : "", order.ply ? "ต้องควบไหม" : ""].filter(Boolean).join(" · ")}</p>` : ""}
+      ${isOut ? `<table class="pw-print-table">
+        <thead><tr><th>รายการ</th><th>จำนวนเงิน (บาท)</th></tr></thead>
+        <tbody>
+          ${order.buyYarn ? `<tr><td>ค่าไหม (${fmt(pot.netKg, 3)} กก. × ${fmt(order.yarnPricePerKg, 2)} บาท/กก.)</td><td>${fmt(cost.yarnCost, 0)}</td></tr>` : ""}
+          <tr><td>ค่าจ้างย้อม</td><td>${fmt(cost.serviceCost, 0)}</td></tr>
+          ${order.special ? `<tr><td>Surcharge (${fmt(order.surchargePct, 1)}%)</td><td>${fmt(cost.surcharge, 0)}</td></tr>` : ""}
+          ${order.ply ? `<tr><td>ค่าควบ</td><td>${fmt(cost.plyCost, 0)}</td></tr>` : ""}
+          ${order.rewind ? `<tr><td>ค่ากรอ</td><td>${fmt(cost.windCost, 0)}</td></tr>` : ""}
+          ${order.twist ? `<tr><td>ค่าทวิส</td><td>${fmt(cost.twistCost, 0)}</td></tr>` : ""}
+          ${order.method === "hank" ? `<tr><td>ค่า Hank</td><td>${fmt(cost.hankCost, 0)}</td></tr>` : ""}
+          <tr><td>ภาษี EPZ (${fmt(order.epzPct, 1)}%)</td><td>${fmt(cost.epzTax, 0)}</td></tr>
+          <tr><td><b>รวมทั้งหมด</b></td><td><b>${fmt(cost.total, 0)}</b></td></tr>
+        </tbody>
+      </table>` : ""}
+      <div class="pw-print-sign"><div>ผู้สั่งย้อม / วันที่</div><div>ผู้รับย้อม / วันที่</div></div>
+    </div>`;
+  }
+  function ensureDyePrintRoot() {
+    let root = document.getElementById("pwPrint");
+    if (root) return root;
+    root = document.createElement("div");
+    root.id = "pwPrint";
+    root.hidden = true;
+    root.innerHTML = `<div class="pw-print-bar"><strong>ใบสั่งย้อม</strong><span class="pw-print-spacer"></span><span class="pw-print-tip">เลือกกระดาษ A4 แนวตั้ง</span><button type="button" class="primary" data-pw-print-action="print">พิมพ์ / บันทึกเป็น PDF</button><button type="button" data-pw-print-action="close">ปิด</button></div><div class="pw-print-scroll"></div>`;
+    document.body.appendChild(root);
+    root.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-pw-print-action]");
+      if (!btn) return;
+      if (btn.dataset.pwPrintAction === "print") window.print(); else closeDyePrint();
+    });
+    return root;
+  }
+  function openDyePrint(p, items) {
+    if (!items.length) { toast("ไม่มีใบสั่งย้อมให้พิมพ์"); return; }
+    showPrintSheets(items.map((it) => buildDyeOrderPrintSheetHtml(p, it.pot, it.order)).join(""));
+  }
+  // ---- ใช้ overlay/ปุ่มพิมพ์ร่วมกันกับหน้า "ใบสั่งย้อมรวม" (dye-combined.js) ผ่าน PlanningEngine — ไม่ต้องสร้าง overlay ซ้ำคนละที่ ----
+  function showPrintSheets(html) {
+    const root = ensureDyePrintRoot();
+    root.querySelector(".pw-print-scroll").innerHTML = html;
+    root.hidden = false;
+    document.body.classList.add("pw-printing");
+  }
+  function closeDyePrint() {
+    const root = document.getElementById("pwPrint");
+    if (root) root.hidden = true;
+    document.body.classList.remove("pw-printing");
+  }
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { const r = document.getElementById("pwPrint"); if (r && !r.hidden) closeDyePrint(); } });
 
   // แผง "ประเมินจากรูปแบบ" (เบื้องต้น) — ดูรูปดีไซน์ที่อัปโหลดไว้แล้ว วิเคราะห์สีเด่น/สัดส่วนพื้นที่ลาย ด้วยสูตรของเราเอง
   function photoAnalysisPanelHtml(p) {
@@ -741,6 +850,7 @@
     const weaveSeg = sched.segs[2];
     const dyeOrderRows = syncDyeOrders(p, dye.pots, dyeSeg);
     const dyeOrderGrandTotal = dyeOrderRows.reduce((t, r) => t + (r.order.source === "outsource" ? dyeOrderCost(r.order, r.pot.netKg).total : 0), 0);
+    const dyeCapKg = loadDyeCapKg();
     const weaveOut = syncWeaveOutsource(p, weaveSeg, weaveGrade ? weaveGrade.grade : "");
     const weaveOutCost = weaveOutsourceCost(weaveOut, p.totalAreaSqm, dye.totalNetKg);
     const deptSentDates = syncDeptSentDates(p, sched);
@@ -825,9 +935,11 @@
     </section>
 
     <section class="department-panel pw-card wide">
-      <div class="panel-heading"><div><strong>4) ใบสั่งย้อม (Dye Order)</strong><small>ต่อยอดจากหม้อย้อมในข้อ 2 · วันที่เปิดใบสั่ง/ต้องการไหมผูกกับกำหนดการ "สั่งย้อมไหม" ใน Master Plan (ข้อ 3) อัตโนมัติ แก้เองได้แต่จะเตือนถ้าไม่ตรง</small></div></div>
+      <div class="panel-heading"><div><strong>4) ใบสั่งย้อม (Dye Order)</strong><small>ต่อยอดจากหม้อย้อมในข้อ 2 · วันที่เปิดใบสั่ง/ต้องการไหมผูกกับกำหนดการ "สั่งย้อมไหม" ใน Master Plan (ข้อ 3) อัตโนมัติ แก้เองได้แต่จะเตือนถ้าไม่ตรง</small></div>
+        <label class="pf tiny" data-dye-cap style="max-width:220px">เกณฑ์ย้อมในบริษัท (กก./หม้อ)<input type="number" name="dyeCapKg" min="0" step="0.5" value="${esc(dyeCapKg)}" title="ถ้าหม้อย้อมไหนเกินนี้ ระบบจะแนะนำ/สลับให้ส่งจ้างย้อมภายนอกอัตโนมัติตอนสร้างใบสั่งย้อมใหม่ (แก้ไขเพิ่มเติมได้)"></label>
+      </div>
       <div class="pw-body">
-        ${dyeOrderRows.length ? `<div class="pw-dye-grid-outer">${dyeOrderRows.map((r) => dyeOrderCardHtml(r.pot, r.order, dyeSeg)).join("")}</div>` : `<p class="col-empty">ยังไม่มีหม้อย้อม — เพิ่มโซนในข้อ 2 ก่อน</p>`}
+        ${dyeOrderRows.length ? `<div class="pw-row"><button type="button" class="text-button" data-print-dye-all>🖨 พิมพ์ใบสั่งย้อมทุกหม้อ (PDF)</button></div><div class="pw-dye-grid-outer">${dyeOrderRows.map((r) => dyeOrderCardHtml(r.pot, r.order, dyeSeg, dyeCapKg)).join("")}</div>` : `<p class="col-empty">ยังไม่มีหม้อย้อม — เพิ่มโซนในข้อ 2 ก่อน</p>`}
         ${dyeOrderRows.some((r) => r.order.source === "outsource") ? `<div class="pw-row"><span class="tag-total">รวมค่าใช้จ่ายจ้างย้อมภายนอกทั้งหมด ≈ ${fmt(dyeOrderGrandTotal, 0)} บาท</span></div>` : ""}
       </div>
     </section>
@@ -874,6 +986,8 @@
       </div>
     </section>
 
+    ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(p.designId, "planning") : ""}
+
     <div class="pw-save-bar"><button type="button" class="action-button primary" data-save-plan>บันทึกแผนและส่งเข้า Master Plan Gantt</button>${p.savedAt ? `<small>บันทึกล่าสุด ${new Date(p.savedAt).toLocaleString("th-TH")}</small>` : ""}</div>`;
   }
 
@@ -895,11 +1009,28 @@
   }
 
   function renderJobPicker() { $("#pwJobPicker").innerHTML = jobPickerHtml(); }
+  // กันเรียกซ้อน (reentrant): การลบช่องที่กำลังโฟกัสอยู่ตอนรื้อ innerHTML อาจทำให้เบราว์เซอร์ยิง blur/change ของช่องนั้น
+  // ทันที ซึ่งไปเข้า listener "change" ของเราอีกที เรียก renderForm() ซ้อนขึ้นมาระหว่าง innerHTML เดิมกำลังลบโหนดอยู่
+  // (พบเป็น browser error "node to be removed is no longer a child" ในหน้าที่โครงสร้างคล้ายกัน — กันไว้ก่อน)
+  let renderingForm = false;
   function renderForm() {
-    const container = $("#pwForm");
-    const focusInfo = captureFocus(container);
-    container.innerHTML = state.plan ? buildForm() : `<p class="col-empty">เลือก Job ด้านบนเพื่อเริ่มวางแผน</p>`;
-    restoreFocus(container, focusInfo);
+    if (renderingForm) return;
+    renderingForm = true;
+    try {
+      const container = $("#pwForm");
+      const focusInfo = captureFocus(container);
+      container.innerHTML = state.plan ? buildForm() : `<p class="col-empty">เลือก Job ด้านบนเพื่อเริ่มวางแผน</p>`;
+      restoreFocus(container, focusInfo);
+      // จำสถานะเปิด/ปิดของกล่อง "รายละเอียดต้นทุนจ้างย้อม" ต่อหม้อย้อม ไม่ให้ยุบทุกครั้งที่พิมพ์ข้อมูล (renderForm ทำ innerHTML ใหม่ทั้งหมด)
+      container.querySelectorAll(".pw-dye-cost-detail").forEach((d) => {
+        const card = d.closest("[data-pot]");
+        const potKey = card && card.getAttribute("data-pot");
+        if (!potKey) return;
+        d.addEventListener("toggle", () => { state.dyeCostOpen[potKey] = d.open; });
+      });
+    } finally {
+      renderingForm = false;
+    }
   }
   function renderAll() { renderJobPicker(); renderForm(); }
 
@@ -939,6 +1070,36 @@
     root.addEventListener("click", (e) => {
       const pick = e.target.closest("[data-pick]");
       if (pick) { pickJob(pick.dataset.pick); return; }
+      const moSkip = e.target.closest("[data-mo-skip]");
+      if (moSkip) {
+        if (typeof OverviewEngine === "undefined" || !OverviewEngine.setSkipped) return;
+        const designId = moSkip.dataset.moSkip;
+        if (!confirm(`ยืนยันกดผ่าน M/O,S/O "${moSkip.dataset.moSkipMono || designId}" — จะหายจากคิวงานของทุกแผนกทันที (ใช้เมื่องานนี้ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิตแล้วเท่านั้น)`)) return;
+        OverviewEngine.setSkipped(designId, moSkip.dataset.moSkipMono);
+        if (state.designId === designId) { state.designId = null; state.plan = null; }
+        toast("กดผ่านแล้ว — ยกเลิกได้ที่หน้าภาพรวมการผลิต");
+        renderAll();
+        return;
+      }
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderForm)) return;
+      const useMatPrice = e.target.closest("[data-use-material-price]");
+      if (useMatPrice) {
+        const order = state.plan.dyeOrders[useMatPrice.dataset.useMaterialPrice];
+        if (order) { order.yarnPricePerKg = Number(useMatPrice.dataset.materialPriceValue) || 0; renderForm(); }
+        return;
+      }
+      const printDye = e.target.closest("[data-print-dye]");
+      if (printDye) {
+        const info = printInfoForPot(state.plan, printDye.dataset.printDye);
+        if (info) openDyePrint(state.plan, [info]);
+        return;
+      }
+      const printDyeAll = e.target.closest("[data-print-dye-all]");
+      if (printDyeAll) {
+        const items = Object.keys(state.plan.dyeOrders).map((k) => printInfoForPot(state.plan, k)).filter(Boolean);
+        openDyePrint(state.plan, items);
+        return;
+      }
       const addZone = e.target.closest("[data-add-zone]");
       if (addZone) {
         const prev = state.plan.zones[state.plan.zones.length - 1] || null;
@@ -1018,6 +1179,8 @@
     });
     root.addEventListener("input", (e) => {
       if (!state.plan) return;
+      if (e.target.name === "dyeCapKg") { saveDyeCapKg(e.target.value); renderForm(); return; }
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange && CostEngine.handleExtraCostFieldChange(e)) { renderForm(); return; }
       const mixRow = e.target.closest("[data-mixrow]");
       if (mixRow) {
         const [zoneId, mixId] = mixRow.dataset.mixrow.split(":");

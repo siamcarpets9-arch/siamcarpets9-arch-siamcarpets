@@ -131,11 +131,15 @@
 
   function jobPickerHtml(state) {
     const plans = PE() ? PE().readJson(PE().KEY_PLANS, {}) : {};
-    const ready = designs.filter((d) => d.job === "OPENED" && plans[d.id] && plans[d.id].savedAt);
+    const isSkipped = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.isSkipped ? OverviewEngine.isSkipped(id) : false;
+    const typeOf = (d) => typeof OverviewEngine !== "undefined" && OverviewEngine.typeOf ? OverviewEngine.typeOf(d) : "MO";
+    const ready = designs.filter((d) => d.job === "OPENED" && plans[d.id] && plans[d.id].savedAt && !isSkipped(d.id) && typeOf(d) !== "SO");
     if (!ready.length) return `<p class="col-empty">ยังไม่มี Job ที่ Planning บันทึกแผน (ทำใบวางแผนงานให้เสร็จก่อน)</p>`;
-    return `<div class="pw-job-grid">${ready.map((d) => `<button type="button" class="pw-job-card dept-weaveissue ${state.designId === d.id ? "active" : ""}" data-wpick="${esc(d.id)}">
-      <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
-    </button>`).join("")}</div>`;
+    return `<div class="pw-job-grid">${ready.map((d) => `<div class="pw-job-card-wrap">
+      <button type="button" class="pw-job-card dept-weaveissue ${state.designId === d.id ? "active" : ""}" data-wpick="${esc(d.id)}">
+        <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
+      </button>${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(d.id, d.id) : ""}
+    </div>`).join("")}</div>`;
   }
 
   function readinessTag(ok) { return ok ? `<span class="status-tag">พร้อม</span>` : `<span class="status-tag blocked">ยังไม่พร้อม</span>`; }
@@ -226,7 +230,9 @@
         </table>
         ${rec.usage.length ? `<table class="calc-table" style="margin-top:8px"><thead><tr><th>หม้อย้อม/สี</th><th class="num">สั่ง/ส่งมอบ</th><th class="num">ใช้จริง</th><th class="num">ส่วนต่าง</th><th>ผล</th><th>วันที่</th></tr></thead><tbody>${rec.usage.slice().reverse().map(usageRowHtml).join("")}</tbody></table>` : ""}
       </div>
-    </section>`;
+    </section>
+
+    ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(state.designId, "weaveissue") : ""}`;
   }
 
   function surplusPanelHtml() {
@@ -277,6 +283,18 @@
     root.addEventListener("click", (e) => {
       const pick = e.target.closest("[data-wpick]");
       if (pick) { state.designId = pick.dataset.wpick; renderAll(); return; }
+      const moSkip = e.target.closest("[data-mo-skip]");
+      if (moSkip) {
+        if (typeof OverviewEngine === "undefined" || !OverviewEngine.setSkipped) return;
+        const designId = moSkip.dataset.moSkip;
+        if (!confirm(`ยืนยันกดผ่าน M/O,S/O "${moSkip.dataset.moSkipMono || designId}" — จะหายจากคิวงานของทุกแผนกทันที (ใช้เมื่องานนี้ส่งไปนานแล้ว ไม่อยู่ในกระบวนการผลิตแล้วเท่านั้น)`)) return;
+        OverviewEngine.setSkipped(designId, moSkip.dataset.moSkipMono);
+        if (state.designId === designId) state.designId = null;
+        toast("กดผ่านแล้ว — ยกเลิกได้ที่หน้าภาพรวมการผลิต");
+        renderAll();
+        return;
+      }
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
       const issueBtn = e.target.closest("[data-wi-issue]");
       if (issueBtn && !issueBtn.disabled) {
         const rec = loadIssues()[state.designId];
@@ -309,6 +327,7 @@
     });
     root.addEventListener("input", (e) => {
       if (!state.designId) return;
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange && CostEngine.handleExtraCostFieldChange(e)) return;
       const potRow = e.target.closest("[data-pot]");
       if (potRow && e.target.name === "surplusDrawn") {
         const rec = loadIssues()[state.designId];
