@@ -252,11 +252,13 @@
           <button data-sr="export">ดาวน์โหลด Excel</button>
           <button data-sr="toggle-sales">Sale ผู้ดำเนินการ</button>
           <button data-sr="toggle-series">ตั้งค่าเลข run</button>
+          <button data-sr="toggle-pack">ตั้งค่าวัสดุหีบห่อ</button>
           <button data-mo="blank" title="ฟอร์ม M/O หน้า 1–2 ว่าง ๆ ขนาด A3">ฟอร์ม M/O เปล่า (A3)</button>
         </div>
       </section>
 
       <div id="srMarketTabs" class="sr-tabs"></div>
+      <datalist id="srPackMatList"></datalist>
 
       <section id="srImportPanel" class="sr-panel sr-import" hidden>
         <div class="panel-heading"><div><strong>นำเข้ารายงาน Excel (Reports M/O)</strong><small>อ่านหัวตารางอัตโนมัติ · แถวย่อยที่ไม่มีเลข M/O จะรวมเข้า M/O ก่อนหน้า · นำเข้าซ้ำจะแทนที่ข้อมูลที่นำเข้าเดิมของตลาดและปีเดียวกัน</small></div><button class="text-button" data-sr="toggle-import">ปิด</button></div>
@@ -280,6 +282,12 @@
       <section id="srSaleMapPanel" class="sr-panel" hidden>
         <div class="panel-heading"><div><strong>Sale ผู้ดำเนินการ · จับคู่ลูกค้า → Sale</strong><small>ใส่ชื่อ Sale ของลูกค้าแต่ละราย (ของตลาดที่เลือก) ระบบใช้กับทุก M/O / SO ของลูกค้านั้น · แก้เฉพาะรายใบได้ในตารางทะเบียนหรือในฟอร์ม · ถ้าไม่ได้ตั้งไว้ จะใช้ตารางลูกค้า → Sale ของหน้า “ต้นทุน Design” ที่ชื่อลูกค้าตรงกัน</small></div><button class="text-button" data-sr="toggle-sales">ปิด</button></div>
         <div id="srSaleMapGrid" class="sr-salegrid"></div>
+      </section>
+
+      <section id="srPackMatPanel" class="sr-panel" hidden>
+        <div class="panel-heading"><div><strong>ตั้งค่าวัสดุหีบห่อ · ราคากลางต่อหน่วย</strong><small>ใช้คำนวณยอด Invoice ขายวัสดุหีบห่อเพิ่มเติมอัตโนมัติ — คีย์เพิ่มชนิดใหม่ได้เอง · "ไฟเบอร์กล๊าส" จะตัดออกจากคลังวัสดุ Store ให้อัตโนมัติเมื่อมีการใช้งานในใบ M/O,S/O ไม่ว่าจะตั้งราคาไว้หรือไม่</small></div><button class="text-button" data-sr="toggle-pack">ปิด</button></div>
+        <div class="table-wrap"><table class="sr-table compact"><thead><tr><th>ชื่อวัสดุหีบห่อ</th><th>หน่วย</th><th>ราคา/หน่วย</th><th></th></tr></thead><tbody id="srPackMatBody"></tbody></table></div>
+        <div class="sr-fx"><button type="button" class="action-button" data-sr="pm-add">+ เพิ่มวัสดุหีบห่อชนิดใหม่</button></div>
       </section>
 
       <section class="sr-panel">

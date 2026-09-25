@@ -67,6 +67,30 @@
     return s.length >= 10 ? `${+s.slice(8, 10)} ${SHORT_MONTHS[m - 1]} ${y}` : `${SHORT_MONTHS[m - 1]} ${y} (ไม่ระบุวัน)`;
   };
 
+  /* ---------- บรรจุภัณฑ์ (แผนกขาย): ราคากลาง + ใบแจ้งหนี้ขายเพิ่มเติม ---------- */
+  const KEY_PACK_MATERIALS = "enterprise-sales-pack-materials"; // [{id,name,unit,price}] ราคากลางต่อหน่วย ใช้คิดยอด invoice
+  const KEY_PACK_INVOICES = "enterprise-sales-pack-invoices"; // [{id,invoiceNo,date,docId,market,customer,project,note,items:[{materialName,qty,unit,pricePerUnit,amount}],createdAt}]
+  const FIBER_MATERIAL = "ไฟเบอร์กล๊าส"; // ชื่อวัสดุที่ต้องตัดออกจากคลังวัสดุ Store อัตโนมัติ (เทียบแบบ trim ไม่สนตัวพิมพ์)
+  const DEFAULT_PACK_MATERIALS = [
+    { name: "พลาสติกสีฟ้า", unit: "ม้วน", price: 0 },
+    { name: FIBER_MATERIAL, unit: "แผ่น", price: 0 },
+    { name: "ลังไม้", unit: "ใบ", price: 0 },
+    { name: "พาเลท", unit: "แผ่น", price: 0 }
+  ];
+  function loadPackMaterials() {
+    const list = readJson(KEY_PACK_MATERIALS, null);
+    if (Array.isArray(list) && list.length) return list;
+    const seeded = DEFAULT_PACK_MATERIALS.map((m) => ({ id: uid(), ...m })); // สร้าง id ครั้งแรกแล้วบันทึกทันที ไม่งั้น id จะสุ่มใหม่ทุกครั้งที่เรียก ทำให้แก้ไข/ลบไม่ตรงแถว
+    savePackMaterials(seeded);
+    return seeded;
+  }
+  function savePackMaterials(list) { writeJson(KEY_PACK_MATERIALS, list); }
+  function packMaterialByName(name) { const n = txt(name).toLowerCase(); return n ? loadPackMaterials().find((m) => txt(m.name).toLowerCase() === n) : null; }
+  function loadPackInvoices() { return readJson(KEY_PACK_INVOICES, []); }
+  function savePackInvoices(list) { writeJson(KEY_PACK_INVOICES, list); }
+  function packInvoicesForDoc(docId) { return loadPackInvoices().filter((iv) => iv.docId === docId); }
+  function invTotal(iv) { return (iv.items || []).reduce((t, it) => t + num(it.amount), 0); }
+
   /* ---------- ตั้งค่าเลข run ---------- */
   function loadCfg() {
     const s = readJson(KEY_CFG, {}) || {};
@@ -533,6 +557,7 @@
   const ui = { market: "FOREIGN", year: REPORT_DATE.getFullYear(), month: 0, day: 0, reg: "MO", scope: "all", search: "", sale: "", saleMetric: "inAmt", expanded: new Set(), wb: null };
   let K = null; // ผล KPI ล่าสุด
   let form = null; // สถานะฟอร์ม M/O / SO
+  let packInvForm = null; // สถานะฟอร์ม Invoice ขายวัสดุหีบห่อ
 
   const fmtMoney = (n, d = 2) => (n || 0).toLocaleString("th-TH", { minimumFractionDigits: d, maximumFractionDigits: d });
   function money(obj, d = 2) {
@@ -688,6 +713,16 @@
     return `<table class="sr-lines"><thead><tr><th>Design No.</th><th>Location</th><th>Quality / สี</th><th>ขนาด</th><th class="num">จำนวน</th><th class="num">ตร.ม.</th>${isMO ? `<th class="num">ราคา/หน่วย</th><th class="num">Amount</th><th>ส่งออก</th>` : ""}</tr></thead><tbody>${rows}</tbody></table>` +
       (d.extra ? `<small class="muted">ยอดเพิ่มเติมนอกรายการ ${esc(money({ [d.currency]: d.extra }))}</small> ` : "") + (d.remarks ? `<small class="muted">หมายเหตุ: ${esc(d.remarks)}</small>` : "");
   }
+  function packagingSummaryHtml(d) {
+    const pack = d.packaging || [], invs = packInvoicesForDoc(d.id);
+    const packTable = pack.length ? `<table class="sr-lines"><thead><tr><th>วัสดุหีบห่อ</th><th class="num">จำนวน</th><th>หน่วย</th><th>หมายเหตุ</th></tr></thead><tbody>${pack.map((r) => `<tr><td>${esc(r.materialName) || "-"}</td><td class="num">${r.qty != null ? fmtSqm(r.qty) : "-"}</td><td>${esc(r.unit) || "-"}</td><td>${esc(r.note) || "-"}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">ยังไม่ได้บันทึกวัสดุหีบห่อสำหรับใบนี้</p>`;
+    const invTable = invs.length ? `<table class="sr-lines"><thead><tr><th>เลขที่ Invoice</th><th>วันที่</th><th class="num">ยอดรวม</th><th></th></tr></thead><tbody>${invs.map((iv) => `<tr><td>${esc(iv.invoiceNo) || "-"}</td><td>${fmtDay(iv.date)}</td><td class="num">${fmtMoney(invTotal(iv))}</td><td><div class="sr-rowbtn"><button type="button" class="action-button ghost" data-sr="pack-inv-print" data-id="${iv.id}">พิมพ์</button><button type="button" class="action-button ghost" data-sr="pack-inv-edit" data-id="${iv.id}">แก้ไข</button><button type="button" class="action-button ghost" data-sr="pack-inv-del" data-id="${iv.id}">ลบ</button></div></td></tr>`).join("")}</tbody></table>` : "";
+    return `<div class="sr-pack-block">
+      <small class="muted">วัสดุหีบห่อ</small>${packTable}
+      <small class="muted">Invoice ขายวัสดุหีบห่อเพิ่มเติม</small>${invTable}
+      <div class="sr-rowbtn"><button type="button" class="action-button add" data-sr="pack-inv-new" data-id="${d.id}">+ เปิด Invoice ขายวัสดุหีบห่อ</button></div>
+    </div>`;
+  }
   const saleCell = (d) => { const v = saleOf(d); return `<td><input class="sale-input" list="srSaleList" data-doc-sale="${d.id}" value="${esc(v)}" placeholder="${NO_SALE}" title="${d.sale ? "กำหนดรายใบ" : v ? "ตามลูกค้า" : "ยังไม่ได้จับคู่"}"></td>`; };
   function moRow(d) {
     const open = ui.expanded.has(d.id), sr = shipRange(d);
@@ -698,7 +733,7 @@
       <td class="num">${d.lines.length}</td><td class="num">${fmtSqm(docSqm(d))}</td><td class="num">${moneyFx({ [d.currency]: docAmount(d) })}</td>
       <td>${sr.text}${d.actualShip ? `<small>วันส่งจริง</small>` : ""}</td><td>${shipTag(d, sr.last)}</td>
       <td><div class="sr-rowbtn"><button class="action-button" data-sr="ship" data-id="${d.id}">${d.actualShip ? "แก้วันส่ง" : "ยืนยันส่ง"}</button><button class="action-button ghost" data-mo="print-doc" data-id="${d.id}" title="พิมพ์ใบ M/O A3 (หน้า 1–2) ส่ง Planning">ใบ M/O A3</button><button class="action-button ghost" data-sr="edit" data-id="${d.id}">แก้ไข</button><button class="action-button ghost" data-sr="del" data-id="${d.id}">ลบ</button></div></td></tr>` +
-      (open ? `<tr class="sub"><td colspan="11">${linesTable(d)}</td></tr>` : "");
+      (open ? `<tr class="sub"><td colspan="11">${linesTable(d)}${packagingSummaryHtml(d)}</td></tr>` : "");
   }
   function soButtons(d) {
     const b = (st, label, cls = "") => `<button class="action-button ${cls}" data-sr="so-status" data-id="${d.id}" data-st="${st}">${label}</button>`;
@@ -711,7 +746,7 @@
       <td class="num">${d.lines.length}</td><td class="num">${fmtSqm(docSqm(d))}</td>
       <td>${tag(SO_STATUS[d.status] || d.status, SO_KIND[d.status] || "")}${d.statusAt ? `<small>${fmtDay(d.statusAt)}</small>` : ""}</td>
       <td><div class="sr-rowbtn">${soButtons(d)}<button class="action-button ghost" data-sr="edit" data-id="${d.id}">แก้ไข</button><button class="action-button ghost" data-sr="del" data-id="${d.id}">ลบ</button></div></td></tr>` +
-      (open ? `<tr class="sub"><td colspan="9">${linesTable(d)}</td></tr>` : "");
+      (open ? `<tr class="sub"><td colspan="9">${linesTable(d)}${packagingSummaryHtml(d)}</td></tr>` : "");
   }
   function renderRegister() {
     const all = (t) => docs.filter((d) => d.market === ui.market && d.type === t).length;
@@ -741,6 +776,8 @@
     renderTabs(); renderPeriod(); renderKpi(); renderSaleSummary(); renderSaleMatrix(); renderMonthly(); renderDaily(); renderRegister();
     if (!$("#srSaleMapPanel").hidden && !(opts && opts.keepMap)) renderSaleMap();
     if (!$("#srSeriesPanel").hidden) renderSeries();
+    if (!$("#srPackMatPanel").hidden) renderPackMat();
+    $("#srPackMatList").innerHTML = loadPackMaterials().map((m) => `<option value="${esc(m.name)}">`).join("");
     $("#srImportMarket").value = $("#srImportMarket").value || ui.market;
   }
   const refresh = () => {
@@ -815,7 +852,7 @@
 
   /* ---------- Dialog ---------- */
   function showDialog(html, narrow) { $("#srDialogBody").innerHTML = html; $(".sr-dialog-card").classList.toggle("narrow", !!narrow); $("#srDialog").hidden = false; }
-  function closeDialog() { $("#srDialog").hidden = true; $("#srDialogBody").innerHTML = ""; form = null; }
+  function closeDialog() { $("#srDialog").hidden = true; $("#srDialogBody").innerHTML = ""; form = null; packInvForm = null; }
 
   const blankLine = () => ({ design: "", location: "", quality: "", colors: "", pack: "", pcs: null, size: "", unit: "M2", qty: null, price: null, sqm: 0, amount: 0, ship: "", post: "", ref: "" });
   const calcSqm = (l) => round(l.unit === "F2" ? num(l.qty) * F2_TO_M2 : num(l.qty), 4);
@@ -830,6 +867,7 @@
       draft = { id: uid(), market, type: opt.type, no: "", openDate: todayISO(), customer: row ? row.customer || "" : "", project: row ? row.project || "" : "", pi: "", inv: "", incoterms: "", currency: MARKETS[market].currency, remarks: "", status: opt.type === "SO" ? "DRAFT" : "OPEN", actualShip: "", extra: 0, lines: [blankLine()], source: "manual", designId: row ? row.id : "" };
       if (row) draft.lines[0].design = row.id;
     }
+    if (!Array.isArray(draft.packaging)) draft.packaging = []; // เอกสารเก่าก่อนมีฟีเจอร์นี้ยังไม่มี field นี้
     draft.lines.forEach((l) => { l._ms = num(l.sqm) > 0 && Math.abs(num(l.sqm) - calcSqm(l)) > 0.01; l._ma = l.amount != null && num(l.amount) > 0 && Math.abs(num(l.amount) - num(l.qty) * num(l.price)) > 0.5; });
     form = { draft, auto: !editing, editing: !!editing };
     if (!editing) draft.no = suggestNo(draft.market, draft.type, +draft.openDate.slice(2, 4));
@@ -856,6 +894,11 @@
         <label class="span2">หมายเหตุ<input name="remarks" value="${esc(d.remarks)}"></label>
       </div>
       <div class="sr-form-lines"><div id="srLinesBox">${linesHtml()}</div><button type="button" class="action-button add" data-sr="f-addline">+ เพิ่มรายการ</button></div>
+      <div class="sr-form-lines">
+        <p class="sub"><strong>วัสดุหีบห่อที่ใช้</strong> — พลาสติกสีฟ้า / ไฟเบอร์กล๊าส / ลังไม้ / พาเลท หรือคีย์เพิ่มเอง (รวมทั้งใบ) · ไฟเบอร์กล๊าสจะตัดออกจากคลังวัสดุที่แผนก Store ให้อัตโนมัติเมื่อบันทึก</p>
+        <div id="srPackBox">${packagingHtml()}</div>
+        <button type="button" class="action-button add" data-sr="f-addpack">+ เพิ่มวัสดุหีบห่อ</button>
+      </div>
       ${isMO && window.MoForm ? window.MoForm.editorHtml(d) : ""}
       <div id="srFormMsg"></div>
       <div class="sr-form-actions"><button type="button" class="action-button ghost" data-sr="close-dlg">ยกเลิก</button><button type="submit" class="action-button primary">${form.editing ? "บันทึกการแก้ไข" : d.designId && isMO ? "บันทึกและเปิด Job ส่ง Planning" : "บันทึก"}</button></div>
@@ -908,6 +951,32 @@
       if (a) a.value = q != null && p != null ? String(round(q * p, 2)) : "";
     }
   }
+  /* ---------- วัสดุหีบห่อ (ในฟอร์ม M/O,S/O — รวมทั้งใบ ไม่แยกรายการ) ---------- */
+  const blankPackRow = () => ({ id: uid(), materialName: "", qty: null, unit: "", note: "", storeLedgerId: null });
+  function packagingHtml() {
+    const rows = form.draft.packaging || [];
+    const trs = rows.map((r, i) => `<tr data-i="${i}">
+      <td><input data-pf="materialName" list="srPackMatList" value="${esc(r.materialName)}" placeholder="เช่น ไฟเบอร์กล๊าส"></td>
+      <td class="n"><input data-pf="qty" type="number" step="any" value="${r.qty != null ? r.qty : ""}"></td>
+      <td><input data-pf="unit" value="${esc(r.unit)}" placeholder="หน่วย"></td>
+      <td><input data-pf="note" value="${esc(r.note)}" placeholder="ถ้ามี"></td>
+      <td><button type="button" class="action-button ghost" data-sr="f-delpack" data-i="${i}" title="ลบรายการ">×</button></td></tr>`).join("");
+    return `<div class="tw"><table><thead><tr><th>วัสดุหีบห่อ</th><th>จำนวน</th><th>หน่วย</th><th>หมายเหตุ</th><th></th></tr></thead><tbody>${trs || `<tr><td colspan="5" class="muted">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>`;
+  }
+  function readPackaging() {
+    return $$("#srPackBox tr[data-i]").map((tr) => {
+      const o = { ...(form.draft.packaging[+tr.dataset.i] || blankPackRow()) };
+      const g = (f) => { const el = tr.querySelector(`[data-pf="${f}"]`); return el ? el.value : undefined; };
+      ["materialName", "unit", "note"].forEach((f) => { const v = g(f); if (v !== undefined) o[f] = v.trim(); });
+      const q = g("qty"); if (q !== undefined) o.qty = q === "" ? null : Number(q);
+      return o;
+    });
+  }
+  function packInput(el) {
+    if (el.dataset.pf !== "materialName") return;
+    const tr = el.closest("tr"), unitEl = tr.querySelector('[data-pf="unit"]'), m = packMaterialByName(el.value);
+    if (m && unitEl && !unitEl.value) unitEl.value = m.unit || "";
+  }
   function updateTotals() {
     const lines = readLines(), sq = lines.reduce((t, l) => t + num(l.sqm), 0), am = lines.reduce((t, l) => t + num(l.amount), 0) + num($("#srForm").elements.extra && $("#srForm").elements.extra.value);
     if ($("#srTotSqm")) $("#srTotSqm").textContent = fmtSqm(sq);
@@ -948,6 +1017,7 @@
       return;
     }
     if (t.dataset.f) { lineInput(t); updateTotals(); return; }
+    if (t.dataset.pf) { packInput(t); return; }
     if (t.name === "no") form.auto = false;
     if (t.name === "market") {
       const old = form.draft.market; form.draft.market = t.value;
@@ -968,13 +1038,37 @@
       const o = { ...l, sqm: round(num(l.sqm)), amount: round(num(l.amount), 2) };
       delete o._ms; delete o._ma; return o;
     });
-    const doc = { ...d, market: v("market") || d.market, no: v("no"), openDate: v("openDate"), customer: v("customer"), project: v("project"), pi: v("pi"), inv: v("inv"), incoterms: v("incoterms"), currency: v("currency") || d.currency, remarks: v("remarks"), sale: v("sale") && v("sale") !== derivedSale(v("customer"), d.designId) ? v("sale") : "", extra: f.elements.extra ? round(num(f.elements.extra.value), 2) : 0, lines };
+    const packaging = readPackaging().filter((r) => r.materialName || r.qty != null).map((r) => ({ ...r, qty: r.qty != null ? round(num(r.qty), 3) : null }));
+    const doc = { ...d, market: v("market") || d.market, no: v("no"), openDate: v("openDate"), customer: v("customer"), project: v("project"), pi: v("pi"), inv: v("inv"), incoterms: v("incoterms"), currency: v("currency") || d.currency, remarks: v("remarks"), sale: v("sale") && v("sale") !== derivedSale(v("customer"), d.designId) ? v("sale") : "", extra: f.elements.extra ? round(num(f.elements.extra.value), 2) : 0, lines, packaging };
     delete doc.seq; delete doc.yy;
     if (doc.type === "MO" && window.MoForm) { const mf = window.MoForm.read(f); if (mf) doc.form = mf; }
     if (!doc.no) errs.push("กรอกเลขที่เอกสาร");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(doc.openDate)) errs.push("เลือกวันที่เปิดเอกสาร");
     if (doc.type === "MO" && !lines.length) errs.push("กรอกรายการอย่างน้อย 1 บรรทัด");
     return { doc, errs };
+  }
+  // ตัดวัสดุ "ไฟเบอร์กล๊าส" ที่ใช้บรรจุภัณฑ์ของใบนี้ออกจากคลังวัสดุ Store อัตโนมัติ (เฉพาะไฟเบอร์กล๊าสเท่านั้น — วัสดุหีบห่ออื่นไม่ยุ่งกับ Store)
+  // ผูกแต่ละแถวกับรายการเบิกใน Store ด้วย storeLedgerId ที่เสถียร เพื่อแก้ไข/ลบให้ตรงกันเมื่อบันทึกซ้ำ และลบรายการเบิกที่ไม่มีแถวอ้างอิงแล้ว (ลบแถว/เปลี่ยนชนิดวัสดุ/ลบทั้งใบ)
+  function syncFiberglassPackaging(target, prevPackaging) {
+    if (!window.StoreEngine) return;
+    const ledger = window.StoreEngine.loadLedger();
+    const keepIds = new Set();
+    (target.packaging || []).forEach((row) => {
+      const isFiber = txt(row.materialName) === FIBER_MATERIAL, qty = num(row.qty);
+      const existing = row.storeLedgerId ? ledger.find((e) => e.id === row.storeLedgerId) : null;
+      if (isFiber && qty > 0) {
+        if (existing) {
+          if (num(existing.qty) !== qty) window.StoreEngine.updateLedgerEntry(existing.id, "qty", qty);
+          if (row.unit && existing.unit !== row.unit) window.StoreEngine.updateLedgerEntry(existing.id, "unit", row.unit);
+          keepIds.add(existing.id);
+        } else {
+          const list = window.StoreEngine.addLedgerEntry({ date: todayISO(), direction: "out", materialName: FIBER_MATERIAL, unit: row.unit || "แผ่น", qty, refNo: target.no, note: `ตัดอัตโนมัติจากวัสดุหีบห่อที่ใช้ในใบ ${target.no}${row.note ? " · " + row.note : ""}` });
+          row.storeLedgerId = list[list.length - 1].id;
+          keepIds.add(row.storeLedgerId);
+        }
+      } else if (existing) row.storeLedgerId = null;
+    });
+    (prevPackaging || []).forEach((row) => { if (row.storeLedgerId && !keepIds.has(row.storeLedgerId)) window.StoreEngine.deleteLedgerEntry(row.storeLedgerId); });
   }
   function saveForm(mergeInto) {
     const { doc, errs } = collect();
@@ -986,10 +1080,12 @@
       } else msgBox("เลขที่ซ้ำกับเอกสารที่มีอยู่แล้ว — กรุณาแก้เลขที่");
       return;
     }
-    let target = doc;
+    let target = doc, prevPackaging = [];
     if (mergeInto) {
       target = mergeInto;
+      prevPackaging = target.packaging ? target.packaging.slice() : [];
       target.lines.push(...doc.lines);
+      target.packaging = (target.packaging || []).concat(doc.packaging || []);
       target.extra = round(num(target.extra) + num(doc.extra), 2);
       ["customer", "project", "pi", "inv", "incoterms"].forEach((k) => { if (!target[k] && doc[k]) target[k] = doc[k]; });
       if (doc.remarks) target.remarks = [target.remarks, doc.remarks].filter(Boolean).join(" | ");
@@ -998,9 +1094,12 @@
       if (doc.sale && !target.sale) target.sale = doc.sale;
       if (target.source === "import") target.source = "edited";
     } else if (form.editing) {
+      const prevDoc = docs.find((x) => x.id === doc.id);
+      prevPackaging = prevDoc && Array.isArray(prevDoc.packaging) ? prevDoc.packaging : [];
       if (doc.source === "import") doc.source = "edited";
       docs[docs.findIndex((x) => x.id === doc.id)] = doc;
     } else docs.push(doc);
+    syncFiberglassPackaging(target, prevPackaging);
     stamp(target);
     const s = cfg.series[docSeries(target)];
     if (s.next > 0 && target.seq != null && target.yy === curYY() && target.seq >= s.next) { s.next = 0; saveCfg(); }
@@ -1022,6 +1121,131 @@
       <div class="sr-form-actions"><button class="action-button ghost" data-sr="close-dlg">ยกเลิก</button>${d.actualShip ? `<button class="action-button ghost" data-sr="ship-clear" data-id="${id}">ล้างวันส่งจริง</button>` : ""}<button class="action-button primary" data-sr="ship-save" data-id="${id}">บันทึก</button></div></div>`, true);
   }
   function markEdited(d) { if (d.source === "import") d.source = "edited"; }
+
+  /* ---------- Invoice ขายวัสดุหีบห่อเพิ่มเติม (เปิดเมื่อมีการเก็บเงินจากลูกค้าจริง — ไม่ได้บังคับทุกใบที่มีวัสดุหีบห่อ) ---------- */
+  const blankPackInvoiceItem = () => ({ materialName: "", qty: null, unit: "", pricePerUnit: null, amount: 0 });
+  function prefillInvoiceItemsFromDoc(d) {
+    const materials = loadPackMaterials(), byKey = new Map();
+    (d.packaging || []).forEach((r) => {
+      if (!r.materialName) return;
+      const key = txt(r.materialName).toLowerCase();
+      if (!byKey.has(key)) byKey.set(key, { materialName: r.materialName, qty: 0, unit: r.unit || "" });
+      byKey.get(key).qty += num(r.qty);
+    });
+    return [...byKey.values()].map((r) => {
+      const m = materials.find((x) => txt(x.name).toLowerCase() === txt(r.materialName).toLowerCase()), price = m ? num(m.price) : 0;
+      return { materialName: r.materialName, qty: round(r.qty, 3), unit: r.unit || (m ? m.unit : ""), pricePerUnit: price, amount: round(r.qty * price, 2) };
+    });
+  }
+  function openPackInvoiceForm(docId, invId) {
+    const d = docs.find((x) => x.id === docId);
+    if (!d) return;
+    const editing = invId ? loadPackInvoices().find((x) => x.id === invId) : null;
+    let invoice;
+    if (editing) invoice = JSON.parse(JSON.stringify(editing));
+    else {
+      const items = prefillInvoiceItemsFromDoc(d);
+      invoice = { id: uid(), invoiceNo: "", date: todayISO(), docId: d.id, market: d.market, customer: d.customer, project: d.project, note: "", items: items.length ? items : [blankPackInvoiceItem()], createdAt: new Date().toISOString() };
+    }
+    packInvForm = { invoice, docId: d.id, editing: !!editing, doc: d };
+    showDialog(packInvoiceFormHtml());
+  }
+  function packInvoiceFormHtml() {
+    const inv = packInvForm.invoice, d = packInvForm.doc;
+    return `<form class="sr-form" id="srPackInvForm" autocomplete="off">
+      <h2>${packInvForm.editing ? "แก้ไข" : "เปิด"} Invoice ขายวัสดุหีบห่อ</h2>
+      <p class="sub">อ้างอิงใบ ${esc(d.no)}${d.customer ? " · " + esc(d.customer) : ""} — ออกเมื่อมีการเก็บเงินจากลูกค้าสำหรับวัสดุหีบห่อเพิ่มเติมจริงเท่านั้น</p>
+      <div class="sr-grid">
+        <label class="span2">เลขที่ Invoice<input name="invoiceNo" value="${esc(inv.invoiceNo)}" required></label>
+        <label>วันที่<input name="date" type="date" value="${esc(inv.date)}" required></label>
+        <label class="span2">ลูกค้า<input name="customer" value="${esc(inv.customer)}"></label>
+        <label class="span2">หมายเหตุ<input name="note" value="${esc(inv.note)}"></label>
+      </div>
+      <div class="sr-form-lines"><div id="srPackInvBox">${packInvItemsHtml()}</div><button type="button" class="action-button add" data-sr="pi-additem">+ เพิ่มรายการ</button></div>
+      <div id="srFormMsg"></div>
+      <div class="sr-form-actions"><button type="button" class="action-button ghost" data-sr="close-dlg">ยกเลิก</button><button type="submit" class="action-button primary">บันทึก Invoice</button></div>
+    </form>`;
+  }
+  function packInvItemsHtml() {
+    const items = packInvForm.invoice.items;
+    const rows = items.map((it, i) => `<tr data-i="${i}">
+      <td><input data-pi="materialName" list="srPackMatList" value="${esc(it.materialName)}"></td>
+      <td class="n"><input data-pi="qty" type="number" step="any" value="${it.qty != null ? it.qty : ""}"></td>
+      <td><input data-pi="unit" value="${esc(it.unit)}"></td>
+      <td class="n"><input data-pi="pricePerUnit" type="number" step="any" value="${it.pricePerUnit != null ? it.pricePerUnit : ""}"></td>
+      <td class="n"><input data-pi="amount" type="number" step="any" value="${it.amount || ""}"></td>
+      <td><button type="button" class="action-button ghost" data-sr="pi-delitem" data-i="${i}" title="ลบรายการ">×</button></td></tr>`).join("");
+    const total = items.reduce((t, it) => t + num(it.amount), 0);
+    return `<div class="tw"><table><thead><tr><th>วัสดุหีบห่อ</th><th>จำนวน</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>จำนวนเงิน</th><th></th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td colspan="4">รวม</td><td class="n" id="srPackInvTotal">${fmtMoney(total)}</td><td></td></tr></tfoot></table></div>`;
+  }
+  function readPackInvItems() {
+    return $$("#srPackInvBox tr[data-i]").map((tr) => {
+      const g = (f) => { const el = tr.querySelector(`[data-pi="${f}"]`); return el ? el.value : ""; };
+      return { materialName: g("materialName").trim(), qty: g("qty") === "" ? null : Number(g("qty")), unit: g("unit").trim(), pricePerUnit: g("pricePerUnit") === "" ? null : Number(g("pricePerUnit")), amount: g("amount") === "" ? 0 : Number(g("amount")) };
+    });
+  }
+  function packInvItemInput(el) {
+    const tr = el.closest("tr"), f = el.dataset.pi;
+    if (f === "materialName") {
+      const m = packMaterialByName(el.value);
+      if (m) {
+        const unitEl = tr.querySelector('[data-pi="unit"]'); if (unitEl && !unitEl.value) unitEl.value = m.unit || "";
+        const priceEl = tr.querySelector('[data-pi="pricePerUnit"]'); if (priceEl && !priceEl.value) priceEl.value = m.price || "";
+      }
+    }
+    if (f === "qty" || f === "pricePerUnit" || f === "materialName") {
+      const q = Number(tr.querySelector('[data-pi="qty"]').value) || 0, p = Number(tr.querySelector('[data-pi="pricePerUnit"]').value) || 0;
+      const a = tr.querySelector('[data-pi="amount"]'); if (a) a.value = String(round(q * p, 2));
+    }
+    updatePackInvTotal();
+  }
+  function updatePackInvTotal() { if ($("#srPackInvTotal")) $("#srPackInvTotal").textContent = fmtMoney(readPackInvItems().reduce((t, it) => t + num(it.amount), 0)); }
+  function onPackInvInput(e) { if (e.target.dataset.pi) packInvItemInput(e.target); }
+  function savePackInvoice() {
+    const f = $("#srPackInvForm"), v = (n) => (f.elements[n] ? f.elements[n].value.trim() : "");
+    const items = readPackInvItems().filter((it) => it.materialName || it.qty != null || num(it.amount));
+    const errs = [];
+    if (!v("invoiceNo")) errs.push("กรอกเลขที่ Invoice");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v("date"))) errs.push("เลือกวันที่ Invoice");
+    if (!items.length) errs.push("กรอกรายการอย่างน้อย 1 บรรทัด");
+    if (errs.length) { msgBox(errs.map(esc).join("<br>")); return; }
+    const inv = { ...packInvForm.invoice, invoiceNo: v("invoiceNo"), date: v("date"), customer: v("customer"), note: v("note"), items: items.map((it) => ({ ...it, qty: it.qty != null ? round(num(it.qty), 3) : null, pricePerUnit: it.pricePerUnit != null ? round(num(it.pricePerUnit), 2) : null, amount: round(num(it.amount), 2) })) };
+    let list = loadPackInvoices();
+    list = packInvForm.editing ? list.map((x) => (x.id === inv.id ? inv : x)) : [...list, inv];
+    savePackInvoices(list);
+    closeDialog(); refresh();
+    toast(`บันทึก Invoice ${inv.invoiceNo} แล้ว`);
+  }
+  function printPackInvoice(iv) {
+    if (!window.PlanningEngine || !window.PlanningEngine.showPrintSheets) { toast("ไม่พบระบบพิมพ์ — ลองรีเฟรชหน้าเว็บ"); return; }
+    const d = docs.find((x) => x.id === iv.docId) || {}, cur = d.currency || "THB", sym = SYM[cur] || "";
+    const rows = (iv.items || []).map((it) => `<tr><td>${esc(it.materialName) || "-"}</td><td class="num">${it.qty != null ? fmtSqm(it.qty) : "-"}</td><td>${esc(it.unit) || "-"}</td><td class="num">${it.pricePerUnit != null ? fmtMoney(it.pricePerUnit) : "-"}</td><td class="num">${fmtMoney(it.amount)}</td></tr>`).join("");
+    const html = `<div class="pw-print-sheet">
+      <div class="pw-print-title">ใบแจ้งหนี้ขายวัสดุหีบห่อ (Packing Materials Invoice)</div>
+      <div class="pw-print-meta">
+        <div><b>เลขที่ Invoice:</b> ${esc(iv.invoiceNo)}</div>
+        <div><b>วันที่:</b> ${fmtDay(iv.date)}</div>
+        <div><b>อ้างอิง M/O,S/O:</b> ${esc(d.no || "-")}</div>
+        <div><b>ลูกค้า:</b> ${esc(iv.customer || d.customer || "-")}</div>
+        <div><b>Project:</b> ${esc(d.project || "-")}</div>
+      </div>
+      ${iv.note ? `<p style="margin:0 0 10px"><b>หมายเหตุ:</b> ${esc(iv.note)}</p>` : ""}
+      <table class="pw-print-table">
+        <thead><tr><th>รายการ</th><th>จำนวน</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>จำนวนเงิน (${sym})</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="4"><b>รวมทั้งหมด</b></td><td><b>${sym}${fmtMoney(invTotal(iv))}</b></td></tr></tfoot>
+      </table>
+      <div class="pw-print-sign"><div>ผู้ออก Invoice / วันที่</div><div>ลูกค้า / วันที่รับ</div></div>
+    </div>`;
+    window.PlanningEngine.showPrintSheets(html);
+  }
+  function renderPackMat() {
+    $("#srPackMatBody").innerHTML = loadPackMaterials().map((m) => `<tr data-id="${m.id}">
+      <td><input data-pm="name" value="${esc(m.name)}"></td>
+      <td><input data-pm="unit" class="w-prefix" value="${esc(m.unit)}"></td>
+      <td><input data-pm="price" class="w-next" type="number" step="any" min="0" value="${m.price || ""}"></td>
+      <td><button type="button" class="action-button ghost" data-sr="pm-del" data-id="${m.id}">ลบ</button></td></tr>`).join("");
+  }
 
   /* ---------- events ---------- */
   function armDelete(el) {
@@ -1050,12 +1274,30 @@
     else if (a === "expand") { ui.expanded.has(id) ? ui.expanded.delete(id) : ui.expanded.add(id); renderRegister(); }
     else if (a === "edit") openForm({ docId: id });
     else if (a === "ship") openShipDialog(id);
-    else if (a === "del") { if (armDelete(el)) { docs = docs.filter((d) => d.id !== id); ui.expanded.delete(id); refresh(); toast("ลบเอกสารแล้ว"); } }
+    else if (a === "del") {
+      if (armDelete(el)) {
+        const d = docs.find((x) => x.id === id);
+        if (d && window.StoreEngine) (d.packaging || []).forEach((row) => { if (row.storeLedgerId) window.StoreEngine.deleteLedgerEntry(row.storeLedgerId); });
+        savePackInvoices(loadPackInvoices().filter((iv) => iv.docId !== id));
+        docs = docs.filter((d) => d.id !== id); ui.expanded.delete(id); refresh(); toast("ลบเอกสารแล้ว");
+      }
+    }
     else if (a === "so-status") { const d = docs.find((x) => x.id === id); if (d) { d.status = el.dataset.st; d.statusAt = todayISO(); refresh(); toast(`${d.no}: ${SO_STATUS[d.status]}`); } }
     else if (a === "close-dlg") closeDialog();
     else if (a === "f-nextno") { form.auto = true; fillNo(); updateHint(); }
     else if (a === "f-addline") { form.draft.lines = readLines(); form.draft.lines.push(blankLine()); $("#srLinesBox").innerHTML = linesHtml(); updateTotals(); }
     else if (a === "f-delline") { const ls = readLines(); ls.splice(+el.dataset.i, 1); form.draft.lines = ls.length ? ls : [blankLine()]; $("#srLinesBox").innerHTML = linesHtml(); updateTotals(); }
+    else if (a === "f-addpack") { form.draft.packaging = readPackaging(); form.draft.packaging.push(blankPackRow()); $("#srPackBox").innerHTML = packagingHtml(); }
+    else if (a === "f-delpack") { const ps = readPackaging(); ps.splice(+el.dataset.i, 1); form.draft.packaging = ps; $("#srPackBox").innerHTML = packagingHtml(); }
+    else if (a === "pack-inv-new") openPackInvoiceForm(id);
+    else if (a === "pack-inv-edit") { const iv = loadPackInvoices().find((x) => x.id === id); if (iv) openPackInvoiceForm(iv.docId, iv.id); }
+    else if (a === "pack-inv-print") { const iv = loadPackInvoices().find((x) => x.id === id); if (iv) printPackInvoice(iv); }
+    else if (a === "pack-inv-del") { if (armDelete(el)) { savePackInvoices(loadPackInvoices().filter((x) => x.id !== id)); refresh(); toast("ลบ Invoice แล้ว"); } }
+    else if (a === "pi-additem") { packInvForm.invoice.items = readPackInvItems(); packInvForm.invoice.items.push(blankPackInvoiceItem()); $("#srPackInvBox").innerHTML = packInvItemsHtml(); }
+    else if (a === "pi-delitem") { const items = readPackInvItems(); items.splice(+el.dataset.i, 1); packInvForm.invoice.items = items.length ? items : [blankPackInvoiceItem()]; $("#srPackInvBox").innerHTML = packInvItemsHtml(); }
+    else if (a === "toggle-pack") { const p = $("#srPackMatPanel"); p.hidden = !p.hidden; if (!p.hidden) renderPackMat(); }
+    else if (a === "pm-add") { const list = loadPackMaterials(); list.push({ id: uid(), name: "", unit: "", price: 0 }); savePackMaterials(list); renderPackMat(); }
+    else if (a === "pm-del") { if (armDelete(el)) { savePackMaterials(loadPackMaterials().filter((m) => m.id !== id)); renderPackMat(); toast("ลบชนิดวัสดุหีบห่อแล้ว"); } }
     else if (a === "f-merge") saveForm(docs.find((d) => d.id === id));
     else if (a === "f-dupno") { msgBox(""); const n = $("#srForm").elements.no; n.focus(); n.select(); }
     else if (a === "f-remove-photo") { if (form && form.draft.designId) { removeDesignPhoto(form.draft.designId); toast("ลบรูปดีไซน์แล้ว"); showDialog(formHtml()); updateHint(); updateTotals(); updateSalePh(); } }
@@ -1066,9 +1308,9 @@
     } else if (a === "ship-clear") { const d = docs.find((x) => x.id === id); d.actualShip = ""; markEdited(d); closeDialog(); refresh(); }
   });
   const dlg = $("#srDialog");
-  dlg.addEventListener("input", onFormInput);
-  dlg.addEventListener("change", onFormInput);
-  dlg.addEventListener("submit", (e) => { e.preventDefault(); if (form) saveForm(); });
+  dlg.addEventListener("input", (e) => { if (packInvForm) onPackInvInput(e); else onFormInput(e); });
+  dlg.addEventListener("change", (e) => { if (packInvForm) onPackInvInput(e); else onFormInput(e); });
+  dlg.addEventListener("submit", (e) => { e.preventDefault(); if (packInvForm) savePackInvoice(); else if (form) saveForm(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !dlg.hidden) closeDialog(); });
   $("#srYear").addEventListener("change", (e) => { ui.year = +e.target.value; ui.day = 0; renderSalesReport(); });
   $("#srMonth").addEventListener("change", (e) => { ui.month = +e.target.value; ui.day = 0; renderSalesReport(); });
@@ -1106,6 +1348,15 @@
     saveCfg(); docs.forEach(stamp); saveDocs(); renderSalesReport(); renderSeries();
   });
   $("#srFx").addEventListener("change", (e) => { cfg.fx = Math.max(0, num(e.target.value)); saveCfg(); renderSalesReport(); });
+  $("#srPackMatBody").addEventListener("change", (e) => {
+    const tr = e.target.closest("tr[data-id]"); if (!tr) return;
+    const list = loadPackMaterials(), m = list.find((x) => x.id === tr.dataset.id); if (!m) return;
+    const f = e.target.dataset.pm;
+    if (f === "price") m.price = Math.max(0, num(e.target.value));
+    else if (f === "name") m.name = e.target.value.trim();
+    else if (f === "unit") m.unit = e.target.value.trim();
+    savePackMaterials(list); renderSalesReport();
+  });
 
   /* ---------- เชื่อมกับหน้า Sales Job Opening ---------- */
   function salesRowExtra(row) {
