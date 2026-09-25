@@ -49,6 +49,23 @@
 .pw-params input{width:38px}
 .pw-zone-table td.num{white-space:nowrap;text-align:right}
 
+/* "ประเมินจากรูปแบบ" (เบื้องต้น) — วิเคราะห์รูปดีไซน์ด้วย Canvas ในเบราว์เซอร์เอง ไม่เรียก AI ภายนอก */
+.pw-photo-ai{display:flex;gap:12px;align-items:flex-start;padding:10px;margin-bottom:8px;background:#f7faf9;border:1px solid var(--line)}
+.pw-photo-ai-thumb{width:64px;height:64px;object-fit:cover;border:1px solid var(--line);flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.pw-photo-ai-empty{display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:8.5px;background:#eef2f1;padding:4px}
+.pw-photo-ai-body{flex:1;min-width:0}
+.pw-photo-ai-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.pw-photo-ai-head strong{font-size:11px}
+.pw-photo-ai-result{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:7px;font-size:10px;color:var(--ink)}
+.pw-photo-ai-swatches{display:inline-flex;gap:2px}
+.pw-photo-ai-swatches i{display:inline-block;width:14px;height:14px;border:1px solid #0002;border-radius:2px}
+.pw-photo-ai-result .text-button{padding:5px 8px;border:1px solid var(--teal);color:var(--teal);background:#fff;font-weight:900;font-size:9.5px}
+.pw-photo-ai small.muted{display:block;margin-top:6px}
+
+/* สวอตช์สีอ้างอิงจากรูปแบบ ต่อแถวโซนสี (ไม่ใช้คำนวณ แค่ช่วยเทียบหารหัสไหมจริง) */
+.pw-colorcode-row{display:inline-flex;align-items:center;gap:4px}
+.pw-refswatch{display:inline-block;width:14px;height:14px;border:1px solid #0002;border-radius:2px;flex-shrink:0}
+
 /* เซลล์รหัสสี — โหมดปกติ / โหมดผสมสี (Stipple) */
 .pw-color-cell{min-width:150px}
 .pw-mix-toggle{display:flex;margin:0 0 3px}

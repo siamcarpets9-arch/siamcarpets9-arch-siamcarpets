@@ -400,12 +400,14 @@
   // สร้างโซนใหม่ 1 แถว — ให้ "AI" (ระบบ) เลือกคุณภาพ (preset) ที่ใกล้เคียงที่สุดให้อัตโนมัติ แทนที่จะบังคับกรอกพารามิเตอร์ทอเองทุกครั้ง
   // like: โซนก่อนหน้า (ใช้เทคนิคทอ/ชนิดไหมเดียวกันต่อ) — ไม่ระบุ = เริ่มจากค่าเริ่มต้นมาตรฐาน (HWO 45, Cut to Side)
   function blankMixRow(colorCode) { return { id: uid("mx"), colorCode: colorCode || "", strands: 1 }; }
-  function blankZone(like, presets) {
+  function blankZone(like, presets, refColor) {
     const yarnCode = (like && like.yarnCode) || "HWO";
     const weaveType = (like && like.weaveType) || "cutside";
     const structure = weaveType === "loop" ? "loop" : "cut";
     const yt = YARN_TYPES_DEFAULT.find((y) => y.code === yarnCode) || YARN_TYPES_DEFAULT[0];
-    const zone = { id: uid("z"), name: "", colorCode: "", weaveType, byArea: false, pct: 0, area: 0, presetId: "", yarnCode: yt.code, S: 28, R: 12, FPH: 9, TPH: 11, N: 4, Tex: yt.tex, mixEnabled: false, mix: [] };
+    // refColor = สีตัวอย่างที่ตรวจพบจากรูปแบบ (ถ้ามาจากปุ่ม "ประเมินจากรูปแบบ") ใช้แค่โชว์เป็นสวอตช์อ้างอิงให้ผู้วางแผน
+    // เทียบหารหัสไหมจริงเอง ไม่ได้ใช้คำนวณอะไร (colorCode ยังว่างต้องกรอกรหัสไหมจริงเองเสมอ)
+    const zone = { id: uid("z"), name: "", colorCode: "", refColor: refColor || "", weaveType, byArea: false, pct: 0, area: 0, presetId: "", yarnCode: yt.code, S: 28, R: 12, FPH: 9, TPH: 11, N: 4, Tex: yt.tex, mixEnabled: false, mix: [] };
     const list = presets || [];
     const preset = list.find((p) => p.yarnCode === yt.code && p.structure === structure && p.quality === "45") || list.find((p) => p.yarnCode === yt.code && p.structure === structure);
     if (preset) applyPresetToZone(zone, preset);
@@ -421,6 +423,83 @@
     };
   }
 
+  /* ============================================================
+     "ประเมินจากรูปแบบ" (เบื้องต้น) — ผู้ใช้ยืนยันให้คำนวณด้วยสูตร/เกณฑ์ของเราเอง ไม่เรียก AI ภายนอก
+     วิเคราะห์รูปดีไซน์ที่อัปโหลดไว้แล้ว (หน้า Design) ด้วย Canvas ของเบราว์เซอร์เอง:
+     1) ลดขนาดภาพแล้วอ่านค่าสีทีละพิกเซล จัดกลุ่ม (quantize) สีที่ใกล้เคียงกันมาก ๆ ให้รวมเป็นสีเดียว
+        (กันสี noise จากการบีบอัด JPEG/รอยหยักขอบลาย)
+     2) "จำนวนสี" = จำนวนกลุ่มสีที่กินพื้นที่อย่างน้อย 1.5% ของภาพขึ้นไป (ตัด noise เล็ก ๆ ทิ้ง)
+     3) "% พื้นที่มีลวดลาย" = 100% ลบด้วยสัดส่วนพื้นที่ของสีที่กินพื้นที่มากที่สุด (ถือเป็นสีพื้นหลัก/พื้นเรียบของลาย)
+     ผลลัพธ์เป็นการ "ประเมินเบื้องต้น" เท่านั้น ไม่ใช่ค่าที่แม่นยำ 100% — ผู้วางแผนควรตรวจสอบก่อนใช้งานจริงเสมอ
+     (ควรใช้รูปที่ครอปเฉพาะลายพรม ไม่มีขอบ/พื้นหลังอื่นปน ไม่งั้นพื้นหลังจะถูกนับเป็น "สีพื้น" ของลายไปด้วย)
+     ============================================================ */
+  function analyzeDesignPhoto(dataUrl) {
+    return new Promise((resolve, reject) => {
+      if (!dataUrl) { reject(new Error("ไม่มีรูปแบบ")); return; }
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const maxDim = 140; // ลดขนาดเพื่อความเร็ว + ลด noise จากรายละเอียดปลีกย่อยเกินไป
+          const scale = Math.min(1, maxDim / Math.max(img.naturalWidth || maxDim, img.naturalHeight || maxDim));
+          const w = Math.max(1, Math.round((img.naturalWidth || maxDim) * scale));
+          const h = Math.max(1, Math.round((img.naturalHeight || maxDim) * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          const data = ctx.getImageData(0, 0, w, h).data;
+          const STEP = 32; // ขนาดช่องสี quantize ต่อช่อง (0-255) — ยิ่งเล็กยิ่งแยกสีถี่ แต่จะไวต่อ noise มากขึ้น
+          const buckets = new Map();
+          let total = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            if (data[i + 3] < 16) continue; // พิกเซลโปร่งใส ไม่นับ
+            const r = data[i], g = data[i + 1], b = data[i + 2];
+            const key = `${Math.round(r / STEP)},${Math.round(g / STEP)},${Math.round(b / STEP)}`;
+            let bucket = buckets.get(key);
+            if (!bucket) { bucket = { count: 0, rSum: 0, gSum: 0, bSum: 0 }; buckets.set(key, bucket); }
+            bucket.count++; bucket.rSum += r; bucket.gSum += g; bucket.bSum += b;
+            total++;
+          }
+          if (!total) { reject(new Error("อ่านข้อมูลภาพไม่ได้")); return; }
+          const sorted = [...buckets.values()].sort((a, b) => b.count - a.count);
+          const MIN_SHARE = 0.015;
+          const significant = sorted.filter((b) => b.count / total >= MIN_SHARE);
+          const ranked = significant.length ? significant : sorted.slice(0, 1);
+          const colorCount = Math.max(1, Math.min(20, ranked.length));
+          const dominantShare = sorted[0].count / total;
+          const patternPct = Math.max(0, Math.min(100, Math.round((1 - dominantShare) * 100)));
+          const toHex = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
+          const palette = ranked.slice(0, 20).map((b) => ({
+            hex: `#${toHex(b.rSum / b.count)}${toHex(b.gSum / b.count)}${toHex(b.bSum / b.count)}`,
+            pct: (b.count / total) * 100
+          }));
+          resolve({ colorCount, patternPct, palette });
+        } catch (e) { reject(e); }
+      };
+      img.onerror = () => reject(new Error("โหลดรูปแบบไม่สำเร็จ"));
+      img.src = dataUrl;
+    });
+  }
+
+  // สร้างแถวสีชุดใหม่ตามจำนวนที่กำหนด แบ่ง % เท่ากัน — ใช้ร่วมกันทั้งปุ่ม "AI สร้างแถวสีให้" (palette ว่าง) และ
+  // ปุ่ม "สร้างแถวสีตามที่พบ" หลังวิเคราะห์รูปแบบ (palette = สีเด่นที่ตรวจพบ ใส่เป็นสวอตช์อ้างอิงต่อแถว)
+  function generateAutoZones(n, palette) {
+    const presets = loadPresets();
+    const template = state.plan.zones[0] || null;
+    const zones = [];
+    const base = Math.floor(1000 / n);
+    let used = 0;
+    for (let i = 0; i < n; i++) {
+      const refColor = palette && palette[i] ? palette[i].hex : "";
+      const z = blankZone(template, presets, refColor);
+      const pctThousandths = i === n - 1 ? 1000 - used : base;
+      used += pctThousandths;
+      z.pct = Math.round(pctThousandths) / 10;
+      zones.push(z);
+    }
+    state.plan.zones = zones;
+  }
+
   function moInfoFor(designId) {
     const row = designs.find((d) => d.id === designId);
     let totalAreaSqm = 0, moNo = row && row.moNo;
@@ -433,7 +512,7 @@
     return { row, moNo, totalAreaSqm };
   }
 
-  const state = { designId: null, plan: null, editGrades: false };
+  const state = { designId: null, plan: null, editGrades: false, photoAnalysis: null, photoAnalyzing: false };
 
   function ensurePlan(designId) {
     const all = loadPlans();
@@ -495,7 +574,7 @@
         ? `<div class="pw-mix-rows">${(zone.mix && zone.mix.length ? zone.mix : []).map((m) => mixRowHtml(zone, m)).join("")}</div>
            <button type="button" class="pw-mix-add" data-add-mix="${zone.id}">+ แม่สี</button>
            ${totalStrands ? `<small class="muted">รวม ${totalStrands} เส้น</small>` : ""}`
-        : `<input name="colorCode" value="${esc(zone.colorCode)}" placeholder="เช่น 34B" class="pw-colorcode">`}`;
+        : `<span class="pw-colorcode-row">${zone.refColor ? `<i class="pw-refswatch" style="background:${esc(zone.refColor)}" title="สีจากรูปแบบ ${esc(zone.refColor)} — ใช้เทียบหารหัสไหมจริงเท่านั้น"></i>` : ""}<input name="colorCode" value="${esc(zone.colorCode)}" placeholder="เช่น 34B" class="pw-colorcode"></span>`}`;
   }
 
   function zoneRowHtml(zone, idx, presets, computed) {
@@ -615,6 +694,32 @@
     </div>`;
   }
 
+  // แผง "ประเมินจากรูปแบบ" (เบื้องต้น) — ดูรูปดีไซน์ที่อัปโหลดไว้แล้ว วิเคราะห์สีเด่น/สัดส่วนพื้นที่ลาย ด้วยสูตรของเราเอง
+  function photoAnalysisPanelHtml(p) {
+    const photo = window.DesignPhotoStore && typeof window.DesignPhotoStore.getDesignPhoto === "function" ? window.DesignPhotoStore.getDesignPhoto(p.designId) : "";
+    const analysis = state.photoAnalysis && state.photoAnalysis.designId === p.designId ? state.photoAnalysis : null;
+    return `<div class="pw-photo-ai">
+      ${photo ? `<img class="pw-photo-ai-thumb" src="${photo}" alt="">` : `<span class="pw-photo-ai-thumb pw-photo-ai-empty">ไม่มีรูปแบบ</span>`}
+      <div class="pw-photo-ai-body">
+        <div class="pw-photo-ai-head">
+          <strong>ประเมินจากรูปแบบ (เบื้องต้น)</strong>
+          <button type="button" class="action-button" data-analyze-photo ${!photo || state.photoAnalyzing ? "disabled" : ""}>${state.photoAnalyzing ? "กำลังวิเคราะห์…" : "วิเคราะห์จากรูปแบบ"}</button>
+        </div>
+        ${!photo ? `<small class="muted">ยังไม่มีรูปแบบของ Design นี้ — ไปอัปโหลดที่หน้า Design ก่อน แล้วกลับมาวิเคราะห์ได้</small>` : ""}
+        ${analysis ? `
+          <div class="pw-photo-ai-result">
+            <span class="pw-photo-ai-swatches" title="สีเด่นที่พบในรูป">${analysis.palette.slice(0, analysis.colorCount).map((c) => `<i style="background:${c.hex}" title="${c.hex} · ${fmt(c.pct, 1)}%"></i>`).join("")}</span>
+            <span>พบสีเด่น <strong>${analysis.colorCount}</strong> สี</span>
+            <span>ประเมิน % ลาย ~<strong>${analysis.patternPct}%</strong></span>
+            <button type="button" class="text-button" data-apply-pattern-pct="${analysis.patternPct}">ใช้ % ลายนี้</button>
+            <button type="button" class="text-button" data-apply-color-zones="${analysis.colorCount}">สร้างแถวสี ${analysis.colorCount} สีตามที่พบ</button>
+          </div>
+          <small class="muted">⚠ ประเมินจากสีเด่นในภาพด้วยสูตรของเราเอง (ไม่ใช่ AI วิเคราะห์ภาพจริง) — ควรใช้รูปที่ครอปเฉพาะลายพรม ไม่มีขอบ/พื้นหลังปน และตรวจสอบผลก่อนใช้งานจริงเสมอ</small>
+        ` : ""}
+      </div>
+    </div>`;
+  }
+
   function buildForm() {
     const p = state.plan, presets = loadPresets(), workers = loadWorkers();
     const weaveGrade = p.weaveGradeOverride ? WEAVE_GRADES.find((g) => g.grade === p.weaveGradeOverride) : suggestGrade(WEAVE_GRADES, p.patternPct);
@@ -651,6 +756,7 @@
           ${field("พื้นที่รวม (ตร.ม.)", inp("totalAreaSqm", p.totalAreaSqm, 'class="pw-num"'))}
           ${field("% พื้นที่มีลวดลาย (% ลาย)", inp("patternPct", p.patternPct, 'class="pw-num"'))}
         </div>
+        ${photoAnalysisPanelHtml(p)}
         ${showGradeEdit ? `<div class="pw-row">
           ${field("เกรดทอ (เว้นว่าง = อัตโนมัติ)", `<select name="weaveGradeOverride"><option value="">อัตโนมัติ</option>${WEAVE_GRADES.map((g) => `<option value="${g.grade}" ${p.weaveGradeOverride === g.grade ? "selected" : ""}>${g.grade}</option>`).join("")}</select>`)}
           ${field("วิธีตอกลาย (เกรด E เลือกได้)", `<select name="punchMethodOverride"><option value="">อัตโนมัติ</option>${PUNCH_GRADES.map((g) => `<option value="${g.grade}|${g.method}" ${p.punchMethodOverride === `${g.grade}|${g.method}` ? "selected" : ""}>${g.grade} (${g.method})</option>`).join("")}</select>`)}
@@ -800,6 +906,8 @@
   function pickJob(id) {
     state.designId = id;
     state.plan = ensurePlan(id);
+    state.photoAnalysis = null;
+    state.photoAnalyzing = false;
     renderAll();
   }
 
@@ -865,19 +973,45 @@
         if (!n || n < 1) n = 1;
         if (n > 20) n = 20;
         if (state.plan.zones.length && !confirm(`สร้างแถวสีใหม่ ${n} แถว จะแทนที่รายการสีเดิมทั้งหมด ต้องการดำเนินการต่อหรือไม่?`)) return;
-        const presets = loadPresets();
-        const template = state.plan.zones[0] || null;
-        const zones = [];
-        const base = Math.floor(1000 / n);
-        let used = 0;
-        for (let i = 0; i < n; i++) {
-          const z = blankZone(template, presets);
-          const pctThousandths = i === n - 1 ? 1000 - used : base;
-          used += pctThousandths;
-          z.pct = Math.round(pctThousandths) / 10;
-          zones.push(z);
-        }
-        state.plan.zones = zones;
+        generateAutoZones(n, null);
+        renderForm();
+        return;
+      }
+      const analyzePhoto = e.target.closest("[data-analyze-photo]");
+      if (analyzePhoto) {
+        const photo = window.DesignPhotoStore && typeof window.DesignPhotoStore.getDesignPhoto === "function" ? window.DesignPhotoStore.getDesignPhoto(state.designId) : "";
+        if (!photo) { toast("ยังไม่มีรูปแบบของ Design นี้ — ไปอัปโหลดที่หน้า Design ก่อน"); return; }
+        state.photoAnalyzing = true;
+        state.photoAnalysis = null;
+        renderForm();
+        const designIdAtStart = state.designId;
+        analyzeDesignPhoto(photo).then((result) => {
+          if (state.designId !== designIdAtStart) return; // ผู้ใช้สลับ Job ระหว่างวิเคราะห์ ทิ้งผลลัพธ์นี้
+          state.photoAnalyzing = false;
+          state.photoAnalysis = { designId: designIdAtStart, ...result };
+          renderForm();
+        }).catch((err) => {
+          if (state.designId !== designIdAtStart) return;
+          state.photoAnalyzing = false;
+          renderForm();
+          toast(`วิเคราะห์รูปแบบไม่สำเร็จ: ${err.message || err}`);
+        });
+        return;
+      }
+      const applyPatternPct = e.target.closest("[data-apply-pattern-pct]");
+      if (applyPatternPct) {
+        state.plan.patternPct = Number(applyPatternPct.dataset.applyPatternPct) || 0;
+        toast(`ใช้ % ลายที่ประเมินได้ (${state.plan.patternPct}%) แล้ว`);
+        renderForm();
+        return;
+      }
+      const applyColorZones = e.target.closest("[data-apply-color-zones]");
+      if (applyColorZones) {
+        const n = Math.max(1, Math.min(20, Number(applyColorZones.dataset.applyColorZones) || 1));
+        if (state.plan.zones.length && !confirm(`สร้างแถวสีใหม่ ${n} แถว ตามที่ประเมินจากรูปแบบ จะแทนที่รายการสีเดิมทั้งหมด ต้องการดำเนินการต่อหรือไม่?`)) return;
+        const palette = state.photoAnalysis && state.photoAnalysis.designId === state.designId ? state.photoAnalysis.palette : null;
+        generateAutoZones(n, palette);
+        toast(`สร้างแถวสีตามที่ประเมินได้ ${n} แถวแล้ว — ตรวจสอบและกรอกรหัสไหมจริงของแต่ละสีต่อ`);
         renderForm();
         return;
       }
