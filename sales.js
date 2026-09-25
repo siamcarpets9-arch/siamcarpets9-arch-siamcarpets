@@ -1117,7 +1117,9 @@
     const planned = d.lines.map((l) => l.post || l.ship || "").filter(Boolean).sort().pop() || "";
     const def = d.actualShip || (planned.length === 10 ? planned : todayISO());
     showDialog(`<div class="sr-form"><h2>ยืนยันวันส่งออกจริง</h2><p class="sub">${esc(d.no)} · ${esc(d.customer)} · ${fmtSqm(docSqm(d))} ตร.ม.<br>วัน Dispatch ตามแผน: ${planned ? fmtDay(planned) : "ไม่ระบุ"} — วันส่งจริงจะแทนวัน Dispatch ในการนับ KPI ส่งออก (ทุกรายการของ M/O นี้)</p>
-      <label class="field">วันส่งจริง<input id="srShipDate" type="date" value="${esc(def)}"></label><div id="srFormMsg"></div>
+      <label class="field">วันส่งจริง<input id="srShipDate" type="date" value="${esc(def)}"></label>
+      <label class="field">เลขที่ INVOICE <small>(ใช้กับ KPI แผนกวางแผน — ส่งตรงตามกำหนด นับว่า "ส่งแล้ว" ต่อเมื่อมีทั้งวันที่ส่งจริงและเลข INV)</small><input id="srShipInv" value="${esc(d.inv || "")}" placeholder="เช่น INV-0001"></label>
+      <div id="srFormMsg"></div>
       <div class="sr-form-actions"><button class="action-button ghost" data-sr="close-dlg">ยกเลิก</button>${d.actualShip ? `<button class="action-button ghost" data-sr="ship-clear" data-id="${id}">ล้างวันส่งจริง</button>` : ""}<button class="action-button primary" data-sr="ship-save" data-id="${id}">บันทึก</button></div></div>`, true);
   }
   function markEdited(d) { if (d.source === "import") d.source = "edited"; }
@@ -1302,9 +1304,9 @@
     else if (a === "f-dupno") { msgBox(""); const n = $("#srForm").elements.no; n.focus(); n.select(); }
     else if (a === "f-remove-photo") { if (form && form.draft.designId) { removeDesignPhoto(form.draft.designId); toast("ลบรูปดีไซน์แล้ว"); showDialog(formHtml()); updateHint(); updateTotals(); updateSalePh(); } }
     else if (a === "ship-save") {
-      const v = $("#srShipDate").value, d = docs.find((x) => x.id === id);
+      const v = $("#srShipDate").value, invEl = $("#srShipInv"), d = docs.find((x) => x.id === id);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) { $("#srFormMsg").innerHTML = `<div class="sr-msg">เลือกวันส่งจริง</div>`; return; }
-      d.actualShip = v; markEdited(d); closeDialog(); refresh(); toast(`${d.no}: ยืนยันส่งจริง ${fmtDay(v)}`);
+      d.actualShip = v; if (invEl) d.inv = invEl.value.trim(); markEdited(d); closeDialog(); refresh(); toast(`${d.no}: ยืนยันส่งจริง ${fmtDay(v)}${d.inv ? ` · INV ${d.inv}` : ""}`);
     } else if (a === "ship-clear") { const d = docs.find((x) => x.id === id); d.actualShip = ""; markEdited(d); closeDialog(); refresh(); }
   });
   const dlg = $("#srDialog");

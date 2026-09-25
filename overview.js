@@ -59,10 +59,11 @@
     weaveissue: { label: "ส่งแผนกทอ", short: "ส่งแผนกทอ", view: "weaveissue", color: "#6f9bb0" },
     weaving: { label: "แผนกทอ (จอทอรายวัน)", short: "แผนกทอ", view: "weavefloor", color: "#13848a" },
     weavefloor: { label: "แผนกทอ (จอทอรายวัน)", short: "แผนกทอ", view: "weavefloor", color: "#13848a" },
+    weave_out: { label: "ทอภายนอก (จ้างทอนอกบริษัทฯ)", short: "ทอภายนอก", view: "planwork", color: "#a15c3e" },
     finishing: { label: "ทากาวตกแต่ง/QC", short: "ตกแต่ง/QC", view: "finishing", color: "#d39a2f" },
     done: { label: "สินค้าสำเร็จรูป (แผนก Store)", short: "Store", view: "qcdash", color: "#438b79" }
   };
-  const DEPT_ORDER = ["planning", "pattern", "dyeing", "weaveissue", "weaving", "finishing", "done"];
+  const DEPT_ORDER = ["planning", "pattern", "dyeing", "weaveissue", "weave_out", "weaving", "finishing", "done"];
 
   function jobs() {
     // sample:true = ข้อมูลตัวอย่างของระบบ (ไม่ใช่งานจริงของบริษัท) ไม่ควรปนกับภาพรวมการผลิตจริง
@@ -233,9 +234,13 @@
     const expected = Object.keys(issueRec.lines || {}).length || (floorRec ? Object.keys(floorRec.pieces || {}).length : 0) || 1;
     const pieces = floorRec && floorRec.pieces ? Object.values(floorRec.pieces) : [];
     const anyFloorActivity = pieces.some((p) => (p.days && Object.keys(p.days).length) || (p.loomNo != null && String(p.loomNo).trim() !== ""));
+    // ส่งจ้างทอภายนอก (ติ๊กไว้ในหน้าวางแผน) — แยกเป็นหมวด "weave_out" ต่างหาก ไม่ปนกับแผนกทอในบริษัทฯ
+    // (จอทอในบริษัทฯ ไม่มีทางมีข้อมูลจริงของงานนี้ จึงไม่รอ anyFloorActivity เหมือนงานทอในบริษัทฯ)
+    const isWeaveOutsourced = Boolean(plan.weaveOutsource && plan.weaveOutsource.enabled);
+    const wo = plan.weaveOutsource || {};
 
-    if (!anyFloorActivity) {
-      /* --- ยังไม่เริ่มขึ้นทอ: เช็คว่าไหมครบทุกสีหรือยัง (นับจากหม้อย้อมจริงของแผน) --- */
+    if (isWeaveOutsourced || !anyFloorActivity) {
+      /* --- ยังไม่เริ่มขึ้นทอในบริษัทฯ (หรือทอภายนอกอยู่): เช็คว่าไหมครบทุกสีหรือยัง (นับจากหม้อย้อมจริงของแผน) --- */
       let dyePots = [];
       try {
         if (PE && Array.isArray(plan.zones)) {
@@ -252,12 +257,23 @@
           updatedAt: patternRec.requisitionAt, source: "live"
         };
       }
-      return { dept: "weaveissue", state: "waiting", stateLabel: "พร้อมส่ง รอขึ้นทอ", updatedAt: patternRec.requisitionAt, source: "live" };
+      if (isWeaveOutsourced) {
+        if (!wo.receivedDate) {
+          return {
+            dept: "weave_out", state: wo.sentDate ? "active" : "waiting",
+            stateLabel: wo.sentDate ? `ส่งจ้างทอภายนอกแล้ว${wo.vendor ? " — " + wo.vendor : ""} · รอรับผ้ากลับ` : "รอส่งจ้างทอภายนอก",
+            updatedAt: wo.sentDate || patternRec.requisitionAt, source: "live"
+          };
+        }
+        // รับผ้าทอกลับจากภายนอกแล้ว (มีวันที่รับผ้า) — ไปแผนกตกแต่งต่อเหมือนงานทอในบริษัทฯ ที่ทอครบทุกชิ้นแล้ว (ข้ามเช็คจอทอในบริษัทฯ ด้านล่าง)
+      } else {
+        return { dept: "weaveissue", state: "waiting", stateLabel: "พร้อมส่ง รอขึ้นทอ", updatedAt: patternRec.requisitionAt, source: "live" };
+      }
     }
 
-    /* --- เริ่มขึ้นทอแล้ว: บอกเบอร์จอที่กำลังทออยู่จริง --- */
+    /* --- เริ่มขึ้นทอในบริษัทฯแล้ว: บอกเบอร์จอที่กำลังทออยู่จริง (ข้ามส่วนนี้ทั้งหมดถ้าเป็นงานทอภายนอก) --- */
     const transferred = pieces.filter((p) => p.transferredToGlueAt).length;
-    if (!pieces.length || transferred < expected) {
+    if (!isWeaveOutsourced && (!pieces.length || transferred < expected)) {
       const loomsWorking = [...new Set(pieces
         .filter((p) => p.days && Object.keys(p.days).length && !p.transferredToGlueAt)
         .map((p) => p.loomNo).filter((n) => n != null && String(n).trim() !== ""))];

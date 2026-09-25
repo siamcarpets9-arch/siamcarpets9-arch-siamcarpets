@@ -234,20 +234,124 @@
   /* ---------- KPI แผนกวางแผน — ส่งตรงตามกำหนด (จากข้อมูลสดในระบบนี้ ไม่ใช่ไฟล์นำเข้า) ----------
      ย้ายมาจากหน้า "ภาพรวมการผลิต" เดิม (ท้าย Master Plan Gantt ที่เลิกใช้แล้ว) — ใช้ WeavingEngine.planningKpi()
      ชุดเดียวกับของเดิมทุกประการ (เทียบวันส่งจริงจากฝ่ายขาย ต้องมีทั้งเลข INV และวันที่ยืนยันส่งจริง กับกำหนดที่
-     Planning วางแผนไว้ตอนบันทึกใบวางแผนงาน) — คนละชุดข้อมูลกับ "KPI แผนกวางแผน (ส่งมอบ)" ด้านล่างซึ่งมาจากไฟล์ Excel นำเข้า */
+     Planning วางแผนไว้ตอนบันทึกใบวางแผนงาน) — คนละชุดข้อมูลกับ "KPI แผนกวางแผน (ส่งมอบ)" ด้านล่างซึ่งมาจากไฟล์ Excel นำเข้า
+     กรองตามวันที่/เดือน: กรองด้วยวันส่งจริง (shipped) — ถ้าเลือกช่วงเวลาใดที่ไม่ใช่ "ทุกช่วงเวลา" รายการที่ยังไม่ส่ง
+     (ไม่มีวันส่งจริง) จะไม่ถูกนับในช่วงนั้น (แต่ยังนับรวมอยู่ในตัวเลขสรุป "รอส่ง/รอ INV" เมื่อเลือก "ทุกช่วงเวลา" เท่านั้น) */
+  function populatePlanningKpiPeriods() {
+    const select = $("#kpiPlanningOnTimePeriod");
+    if (!select) return;
+    const current = select.value || "all";
+    const kpi = typeof WeavingEngine !== "undefined" && WeavingEngine.planningKpi ? WeavingEngine.planningKpi() : null;
+    const years = new Set([REPORT_DATE.getFullYear()]);
+    (kpi ? kpi.rows : []).forEach((r) => { const d = toDate(r.shipped) || toDate(r.committed); if (d) years.add(d.getFullYear()); });
+    const orderedYears = [...years].sort((a, b) => b - a);
+    select.innerHTML = `<option value="all">ทุกช่วงเวลา</option>${orderedYears.map((year) => `
+      <optgroup label="รายเดือน · ${year}">${monthNames.map((name, index) => `<option value="month-${year}-${String(index + 1).padStart(2, "0")}">${name} ${year}</option>`).join("")}</optgroup>
+      <option value="year-${year}">ปี ${year}</option>`).join("")}`;
+    if ([...select.options].some((option) => option.value === current)) select.value = current;
+  }
   function renderPlanningOnTimeKpi() {
     const el = $("#kpiPlanningOnTimeTable");
     const summaryEl = $("#kpiPlanningOnTimeSummary");
     if (!el) return;
     const kpi = typeof WeavingEngine !== "undefined" && WeavingEngine.planningKpi ? WeavingEngine.planningKpi() : null;
+    const periodVal = $("#kpiPlanningOnTimePeriod") ? $("#kpiPlanningOnTimePeriod").value || "all" : "all";
+    const range = periodRange(periodVal);
+    const allRows = kpi ? kpi.rows : [];
+    const rows = range ? allRows.filter((r) => inPeriod(r.shipped, range)) : allRows;
     if (summaryEl) {
-      summaryEl.textContent = kpi && kpi.passRate != null
-        ? `${kpi.passRate.toFixed(0)}% ส่งตรงตามกำหนด · ผ่าน ${kpi.onTime} · ไม่ผ่าน ${kpi.late} · รอส่ง/รอ INV ${kpi.pending} (จาก M/O ที่ Planning บันทึกแผนแล้ว ${kpi.intake} รายการ)`
-        : "ยังไม่มีข้อมูลวันส่งจริงจากฝ่ายขายที่เทียบได้";
+      if (!kpi || !allRows.length) summaryEl.textContent = "ยังไม่มีข้อมูลวันส่งจริงจากฝ่ายขายที่เทียบได้";
+      else if (range) {
+        const onTime = rows.filter((r) => r.status === "onTime").length, late = rows.filter((r) => r.status === "late").length;
+        const passRate = onTime + late ? (onTime / (onTime + late)) * 100 : null;
+        summaryEl.textContent = rows.length
+          ? `${passRate != null ? passRate.toFixed(0) + "%" : "-"} ส่งตรงตามกำหนดในช่วงนี้ · ผ่าน ${onTime} · ไม่ผ่าน ${late} (จากที่ส่งจริงแล้วในช่วงนี้ ${rows.length} รายการ)`
+          : "ไม่มี M/O ที่ส่งจริงในช่วงเวลาที่เลือก";
+      } else {
+        summaryEl.textContent = kpi.passRate != null
+          ? `${kpi.passRate.toFixed(0)}% ส่งตรงตามกำหนด · ผ่าน ${kpi.onTime} · ไม่ผ่าน ${kpi.late} · รอส่ง/รอ INV ${kpi.pending} (จาก M/O ที่ Planning บันทึกแผนแล้ว ${kpi.intake} รายการ)`
+          : "ยังไม่มีข้อมูลวันส่งจริงจากฝ่ายขายที่เทียบได้";
+      }
     }
-    if (!kpi || !kpi.rows.length) { el.innerHTML = `<p class="col-empty">ยังไม่มี M/O ที่ Planning บันทึกแผน</p>`; return; }
+    if (!kpi || !allRows.length) { el.innerHTML = `<p class="col-empty">ยังไม่มี M/O ที่ Planning บันทึกแผน</p>`; return; }
+    if (!rows.length) { el.innerHTML = `<p class="col-empty">ไม่มี M/O ที่ตรงกับช่วงเวลาที่เลือก</p>`; return; }
     const statusTagEl = (s) => s === "onTime" ? tag("ส่งตรงตามกำหนด", "") : s === "late" ? tag("ส่งล่าช้า", "blocked") : tag("รอส่ง/รอ INV", "review");
-    el.innerHTML = `<table class="calc-table"><thead><tr><th>Design</th><th>M/O</th><th>โปรเจกต์</th><th>กำหนดตาม Plan</th><th>เลข INV</th><th>วันส่งจริง</th><th>สถานะ</th></tr></thead><tbody>${kpi.rows.map((r) => `<tr><td>${esc(r.designId)}</td><td>${esc(r.moNo)}</td><td>${esc(r.project)}</td><td>${esc(r.committed || "-")}</td><td>${esc(r.inv || "-")}</td><td>${esc(r.shipped || "-")}</td><td>${statusTagEl(r.status)}</td></tr>`).join("")}</tbody></table>`;
+    el.innerHTML = `<table class="calc-table"><thead><tr><th>Design</th><th>M/O</th><th>โปรเจกต์</th><th>กำหนดตาม Plan</th><th>เลข INV</th><th>วันส่งจริง</th><th>สถานะ</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.designId)}</td><td>${esc(r.moNo)}</td><td>${esc(r.project)}</td><td>${esc(r.committed || "-")}</td><td>${esc(r.inv || "-")}</td><td>${esc(r.shipped || "-")}</td><td>${statusTagEl(r.status)}</td></tr>`).join("")}</tbody></table>`;
+  }
+
+  /* ---------- สรุปน้ำหนักไหมย้อม (แผนกย้อม) แยกต่อ M/O ต่อวัน — จากข้อมูลสดในระบบนี้ (ใบสั่งย้อมของ Planning) ----------
+     จัดกลุ่มตาม "วันที่เปิดใบสั่งย้อม" (issueDate) ของแต่ละหม้อย้อม (pot) เพราะระบบยังไม่มีการบันทึก "วันที่ย้อมเสร็จจริง"
+     แยกต่างหาก — นับน้ำหนักสุทธิ (netKg) รวมและจำนวนสี (จำนวนหม้อย้อม) ต่อ M/O ในแต่ละวัน ตัด S/O ออก (ไม่ใช่งานผลิตจริง) */
+  function dyeKgPerDayRows() {
+    if (typeof PlanningEngine === "undefined" || typeof designs === "undefined") return [];
+    const PE = PlanningEngine;
+    const plans = PE.readJson(PE.KEY_PLANS, {});
+    const isSO = (id) => (typeof OverviewEngine !== "undefined" && OverviewEngine.typeOf ? OverviewEngine.typeOf({ id }) : "MO") === "SO";
+    const isSkipped = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.isSkipped ? OverviewEngine.isSkipped(id) : false;
+    const rows = [];
+    Object.keys(plans).forEach((designId) => {
+      const plan = plans[designId];
+      if (!plan || !plan.savedAt || !Array.isArray(plan.zones) || !plan.zones.length) return;
+      if (isSkipped(designId) || isSO(designId)) return;
+      let dye;
+      try { dye = PE.computeDyePlan(plan.zones, Number(plan.totalAreaSqm) || 0, plan.bufferPct); } catch (e) { return; }
+      (dye.pots || []).forEach((pot) => {
+        const order = (plan.dyeOrders || {})[pot.key];
+        const issueDate = order && order.issueDate ? String(order.issueDate).slice(0, 10) : "";
+        if (!issueDate) return;
+        rows.push({ date: issueDate, designId, moNo: plan.moNo || designId, colorCode: colorCodeOfPot(pot), netKg: pot.netKg });
+      });
+    });
+    return rows;
+  }
+  function colorCodeOfPot(pot) {
+    const c = (pot.contributions && pot.contributions[0] && pot.contributions[0].colorCode) || (pot.zones && pot.zones[0] && pot.zones[0].colorCode) || "";
+    return String(c || "").trim().toUpperCase();
+  }
+  function populateDyeByDayPeriods() {
+    const select = $("#kpiDyeByDayPeriod");
+    if (!select) return;
+    const current = select.value || "all";
+    const years = new Set([REPORT_DATE.getFullYear()]);
+    dyeKgPerDayRows().forEach((r) => { const d = toDate(r.date); if (d) years.add(d.getFullYear()); });
+    const orderedYears = [...years].sort((a, b) => b - a);
+    select.innerHTML = `<option value="all">ทุกช่วงเวลา</option>${orderedYears.map((year) => `
+      <optgroup label="รายเดือน · ${year}">${monthNames.map((name, index) => `<option value="month-${year}-${String(index + 1).padStart(2, "0")}">${name} ${year}</option>`).join("")}</optgroup>
+      <option value="year-${year}">ปี ${year}</option>`).join("")}`;
+    if ([...select.options].some((option) => option.value === current)) select.value = current;
+  }
+  function renderDyeByDayKpi() {
+    const el = $("#kpiDyeByDayResults");
+    if (!el) return;
+    const periodVal = $("#kpiDyeByDayPeriod") ? $("#kpiDyeByDayPeriod").value || "all" : "all";
+    const range = periodRange(periodVal);
+    const all = dyeKgPerDayRows();
+    const rows = range ? all.filter((r) => inPeriod(r.date, range)) : all;
+    if (!rows.length) { el.innerHTML = `<p class="col-empty">${all.length ? "ไม่มีข้อมูลในช่วงเวลาที่เลือก" : "ยังไม่มีใบสั่งย้อมที่ระบุวันที่เปิดใบสั่งในระบบ"}</p>`; return; }
+    // จัดกลุ่ม: วันที่ → M/O → { netKg รวม, ชุดสี }
+    const byDay = new Map();
+    rows.forEach((r) => {
+      if (!byDay.has(r.date)) byDay.set(r.date, new Map());
+      const byMo = byDay.get(r.date);
+      const key = r.designId;
+      if (!byMo.has(key)) byMo.set(key, { moNo: r.moNo, netKg: 0, colors: new Set() });
+      const g = byMo.get(key);
+      g.netKg += num(r.netKg);
+      g.colors.add(r.colorCode || "-");
+    });
+    const days = [...byDay.keys()].sort((a, b) => b.localeCompare(a));
+    el.innerHTML = days.map((day) => {
+      const byMo = byDay.get(day);
+      const moRows = [...byMo.values()].sort((a, b) => String(a.moNo).localeCompare(String(b.moNo), "th"));
+      const dayKg = moRows.reduce((t, r) => t + r.netKg, 0);
+      const dayColors = new Set();
+      moRows.forEach((r) => r.colors.forEach((c) => dayColors.add(c)));
+      return `<div class="kpi-dyeday-block">
+        <div class="panel-heading sub"><div><strong>${thaiDate(day)}</strong><small>${moRows.length} M/O · ${dayColors.size} สี (รวม) · ${fmt(dayKg, 3)} กก. (รวม)</small></div></div>
+        <table class="calc-table"><thead><tr><th>M/O</th><th class="num">จำนวนสี</th><th class="num">น้ำหนักไหมสุทธิรวม (กก.)</th></tr></thead>
+        <tbody>${moRows.map((r) => `<tr><td>${esc(r.moNo)}</td><td class="num">${r.colors.size}</td><td class="num">${fmt(r.netKg, 3)}</td></tr>`).join("")}</tbody></table>
+      </div>`;
+    }).join("");
   }
 
   /* ---------- KPI แผนกวางแผน/ส่งมอบ (Planning_KPI.xlsx ชีต "1.ส่งมอบทั้งหมด ") ---------- */
@@ -549,10 +653,31 @@
       </section>
 
       <section class="department-panel pw-card wide">
-        <div class="panel-heading"><div><strong>KPI แผนกวางแผน — ส่งตรงตามกำหนด</strong><small>จากข้อมูลสดในระบบนี้ (ไม่ต้องนำเข้าไฟล์) — เทียบกำหนดที่ Planning วางแผนไว้ตอนบันทึกใบวางแผนงาน กับวันส่งจริงจากฝ่ายขาย (ต้องมีทั้งเลข INV และวันที่ยืนยันส่งจริง) · ย้ายมาจากหน้า "ภาพรวมการผลิต" เดิม</small></div></div>
+        <div class="panel-heading">
+          <div><strong>KPI แผนกวางแผน — ส่งตรงตามกำหนด</strong><small>จากข้อมูลสดในระบบนี้ (ไม่ต้องนำเข้าไฟล์) — เทียบกำหนดที่ Planning วางแผนไว้ตอนบันทึกใบวางแผนงาน กับวันส่งจริงจากฝ่ายขาย (ต้องมีทั้งเลข INV และวันที่ยืนยันส่งจริง) · ย้ายมาจากหน้า "ภาพรวมการผลิต" เดิม</small></div>
+          <div class="designer-kpi-controls">
+            <label>ช่วงเวลา
+              <select id="kpiPlanningOnTimePeriod"><option value="all">ทุกช่วงเวลา</option></select>
+            </label>
+          </div>
+        </div>
         <div class="pw-body">
           <p id="kpiPlanningOnTimeSummary" class="import-status" style="margin:0 0 8px"></p>
           <div id="kpiPlanningOnTimeTable"></div>
+        </div>
+      </section>
+
+      <section class="department-panel pw-card wide">
+        <div class="panel-heading">
+          <div><strong>สรุปน้ำหนักไหมย้อม (แผนกย้อม) แยกต่อ M/O ต่อวัน</strong><small>จากข้อมูลสดในระบบนี้ (ใบสั่งย้อมของ Planning) — จัดกลุ่มตามวันที่เปิดใบสั่งย้อม รวมน้ำหนักสุทธิ (กก.) และจำนวนสีต่อ M/O ในแต่ละวัน ไม่รวม S/O</small></div>
+          <div class="designer-kpi-controls">
+            <label>ช่วงเวลา
+              <select id="kpiDyeByDayPeriod"><option value="all">ทุกช่วงเวลา</option></select>
+            </label>
+          </div>
+        </div>
+        <div class="pw-body">
+          <div id="kpiDyeByDayResults"></div>
         </div>
       </section>
 
@@ -600,7 +725,10 @@
   function renderAll() {
     populateDesignerPeriods();
     renderDesignerKpi();
+    populatePlanningKpiPeriods();
     renderPlanningOnTimeKpi();
+    populateDyeByDayPeriods();
+    renderDyeByDayKpi();
     renderDyeKpiResults();
     renderPlanningKpiResults();
     if ($("#kpiPatternResults")) $("#kpiPatternResults").innerHTML = patternKpiResultsHtml();
@@ -614,6 +742,8 @@
       const t = e.target;
       if (!t || !t.hasAttribute) return;
       if (t.id === "designerKpiPeriod") { renderDesignerKpi(); return; }
+      if (t.id === "kpiPlanningOnTimePeriod") { renderPlanningOnTimeKpi(); return; }
+      if (t.id === "kpiDyeByDayPeriod") { renderDyeByDayKpi(); return; }
       if (t.hasAttribute("data-import-dye-kpi")) {
         const file = t.files && t.files[0];
         if (file) importDyeKpiExcel(file).then(() => { renderDyeKpiResults(); t.value = ""; });
