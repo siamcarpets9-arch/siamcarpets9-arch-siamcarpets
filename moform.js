@@ -60,22 +60,56 @@
     for (let i = 0; i < ns.length;) { let j = i; while (ns[j + 1] === ns[j] + 1) j++; out.push(j > i + 1 ? `${ns[i]}–${ns[j]}` : ns.slice(i, j + 1).join(", ")); i = j + 1; }
     return pre + out.join(", ");
   }
-  const soToken = (refs) => (refs.join(" ").match(/S\/O\s*[A-Z]?\s*\d{2,5}\/\d{2}/i) || [])[0] || "";
   const autoQuality = (doc) => uniq((doc.lines || []).map((l) => txt(l.quality))).join(" ; ");
   function colorRows(doc) { return ((doc.form && doc.form.colors) || []).filter((c) => txt(c.code) || txt(c.name) || num(c.kg) || txt(c.hex)); }
+
+  /* ---------- อ้างถึง / Ref. (POM · S/O · M/O · อื่นๆ) — รองรับหลายรายการ ---------- */
+  const REF_TYPES = [["SO", "S/O", "S/O "], ["MO", "M/O", "M/O "], ["POM", "POM", "POM "], ["OTHER", "อื่นๆ", ""]];
+  const refPrefix = (type) => { const t = REF_TYPES.find((x) => x[0] === type); return t ? t[2] : ""; };
+  const refLabel = (r) => (refPrefix(r.type) + txt(r.no)).trim();
+  // เดาค่าเริ่มต้นจากคอลัมน์อ้างอิงของแต่ละรายการสินค้า (doc.lines[].ref) — แยก S/O·M/O ออกจากข้อความส่วนที่เหลือ
+  function parseRefText(raw) {
+    const m = raw.match(/(S\/O|M\/O)\s*([A-Za-z]*\s*\d{1,5}\s*\/\s*\d{2,4})/i);
+    if (m) return { type: /^S/i.test(m[1]) ? "SO" : "MO", no: m[2].replace(/\s+/g, "") };
+    return { type: "OTHER", no: raw };
+  }
+  function autoRefRows(doc) {
+    const raws = uniq((doc.lines || []).map((l) => txt(l.ref)));
+    return raws.map(parseRefText);
+  }
+  // รองรับข้อมูลเก่าก่อนมีตารางอ้างอิงหลายรายการ (doc.form.refSo แบบช่องเดียว) — ถ้ามีค่าที่เคยกรอกเองไว้ ให้ยกมาเป็นแถวแรกแทนที่จะถูกทิ้งไปเงียบๆ
+  function refRowsForDoc(doc) {
+    const f = (doc && doc.form) || {};
+    if (f.refs && f.refs.length) return f.refs;
+    if (txt(f.refSo)) return [parseRefText(txt(f.refSo))];
+    return autoRefRows(doc || {});
+  }
+
+  /* ---------- Matching (เทียบสี) — C TO C / S TO C / C TO S / S TO S ---------- */
+  const MATCHING_OPTS = [["", "(อัตโนมัติจาก Pile Texture)"], ["CTOC", "C TO C"], ["STOC", "S TO C"], ["CTOS", "C TO S"], ["STOS", "S TO S"]];
+  const matchingText = (v) => { const o = MATCHING_OPTS.find((x) => x[0] === v); return o ? o[1] : ""; };
+  // ค่าเริ่มต้น: ขนตัด(CUT) ต้องเทียบสีแบบ C TO C, ขนห่วง(LOOP) ต้องเทียบสีแบบ S TO S — CUT&LOOP หรือยังไม่ระบุ ให้เลือกเองต่อแถวสี
+  function matchLabelOf(row, spec) {
+    if (row.matching) return matchingText(row.matching);
+    if (spec.pile === "CUT") return "C TO C";
+    if (spec.pile === "LOOP") return "S TO S";
+    return "";
+  }
+
   function model(doc) {
     const f = (doc && doc.form) || {}, lines = (doc && doc.lines) || [], cols = colorRows(doc || {}), sp = specOf(doc || {});
     const sqm = docSqm(doc || {}), kgHire = cols.filter((c) => c.dye === "HIRE").reduce((t, c) => t + num(c.kg), 0), kgOwn = cols.filter((c) => c.dye === "OWN").reduce((t, c) => t + num(c.kg), 0), kgAll = cols.reduce((t, c) => t + num(c.kg), 0);
     const designs = uniq(lines.map((l) => txt(l.design))), sizes = uniq(lines.map((l) => txt(l.size)));
-    const refs = uniq(lines.map((l) => txt(l.ref)));
+    const refRows = refRowsForDoc(doc);
+    const refsText = refRows.filter((r) => txt(r.no)).map(refLabel).join(" , ");
     const detail = lines.map((l, i) => `${i + 1}) ${txt(l.design) || "-"}${txt(l.location) ? " · " + txt(l.location) : ""}`);
     const areaAuto = lines.map((l) => { const u = l.unit === "F2" ? "ft²" : "m²", q = l.qty != null && l.qty !== "" ? fmt(num(l.qty)) : ""; return `${txt(l.size) || txt(l.design) || "-"}${q ? ` = ${q} ${u}` : ""}${l.unit === "F2" ? ` → ${fmt(lineSqm(l))} ตร.ม.` : ""}`; });
     return {
-      no: doc ? txt(doc.no) : "", refSo: txt(f.refSo) || soToken(refs) || refs[0] || "", customer: txt(doc && doc.customer), productCode: txt(f.productCode), project: txt(doc && doc.project),
+      no: doc ? txt(doc.no) : "", refsText, customer: txt(doc && doc.customer), productCode: txt(f.productCode), project: txt(doc && doc.project),
       sqm, pcs: lines.reduce((t, l) => t + num(l.pcs), 0), detail, areaAuto, quality: txt(f.quality) || autoQuality(doc || {}), designs: txt(f.designNo) || compactDesigns(designs),
       delivery: txt(f.delivery) || autoDelivery(doc || {}), nColors: cols.length, cols, spec: sp, kgHire, kgOwn, kgAll, sizes,
       wPerSqm: sqm > 0 && kgAll > 0 ? kgAll / sqm : 0, specSqm: f.specSqm === "" || f.specSqm == null ? "" : num(f.specSqm), areaNote: txt(f.areaNote),
-      remark: f.remark != null && txt(f.remark) !== "" ? txt(f.remark) : [txt(doc && doc.remarks), ...refs].filter(Boolean).join("\n"),
+      remark: f.remark != null && txt(f.remark) !== "" ? txt(f.remark) : txt(doc && doc.remarks),
       po: txt(f.po) || ((txt(doc && doc.project).match(/^[^\s,;]+/) || [""])[0]), preparedBy: txt(f.preparedBy), approvedBy: txt(f.approvedBy), formDate: txt(f.formDate) || (doc && doc.openDate) || ""
     };
   }
@@ -153,7 +187,7 @@
     let s = "";
     const T = (str, box, o) => { s += fit(str, box, o); };
     T(m.no, [40, 131, 72.2, 86.1], { maxFs: 8.6, bold: true });
-    T(m.refSo, [177, 356, 72.2, 86.1], { maxFs: 7.6 });
+    T(m.refsText, [177, 356, 72.2, 86.1], { maxFs: 7.6, minFs: 4.4 });
     T(m.customer, [68, 245, 86.1, 100.2], { maxFs: 8 });
     T(m.productCode, [285, 356, 86.1, 100.2], { maxFs: 7.6 });
     T(m.project, [45, 356, 100.2, 114.4], { maxFs: 8 });
@@ -176,10 +210,12 @@
     const c = P1.cols;
     m.cols.slice(0, P1_ROWS).forEach((r, i) => {
       const ya = P1.rows[i], yb = P1.rows[i + 1], cell = (a, b) => [c[a], c[b], ya, yb];
-      T(String(i + 1), cell(0, 1), { maxFs: 7.6, anchor: "middle" });
+      // No. = โค้ดสี (ไม่ใช่เลขลำดับ) — ถ้ายังไม่กรอกโค้ด ใช้เลขลำดับแทนชั่วคราว
+      T(txt(r.code) || String(i + 1), cell(0, 1), { maxFs: 6.8, minFs: 3.6, anchor: "middle" });
       if (num(r.kg)) T(fmtKg(num(r.kg)), cell(1, 2), { maxFs: 7.6, anchor: "end" });
       ["DL", "F", "I"].forEach((k, j) => { if (r.light && r.light[k]) s += tick([c[2 + j] + 0.5, ya + 1, c[3 + j] - c[2 + j] - 1, yb - ya - 2]); });
-      T([txt(r.code), txt(r.name)].filter(Boolean).join(" "), cell(5, 6), { maxFs: 7, minFs: 3.6 });
+      // Matching = C TO C / S TO C / C TO S / S TO S (เดาจาก Pile Texture ของ M/O นี้ ถ้าไม่ได้เลือกเอง) + ชื่อสี (ถ้ามี) เป็นบรรทัดเล็กต่อท้าย
+      T([matchLabelOf(r, m.spec), txt(r.name)].filter(Boolean).join("\n"), cell(5, 6), { maxFs: 7, minFs: 3.4 });
       if (r.dye === "OWN") s += tick([c[6] + 0.5, ya + 1, c[7] - c[6] - 1, yb - ya - 2]);
       if (r.dye === "HIRE") s += tick([c[7] + 0.5, ya + 1, c[8] - c[7] - 1, yb - ya - 2]);
       if (txt(r.remark)) T(r.remark, cell(10, 11), { maxFs: 6.6, minFs: 3.6 });
@@ -298,37 +334,54 @@
       <td class="n"><input data-c="kg" type="number" step="any" min="0" value="${c.kg != null && c.kg !== "" ? esc(c.kg) : ""}"></td>
       <td class="ck"><input type="checkbox" data-c="DL" ${l.DL ? "checked" : ""}></td><td class="ck"><input type="checkbox" data-c="F" ${l.F ? "checked" : ""}></td><td class="ck"><input type="checkbox" data-c="I" ${l.I ? "checked" : ""}></td>
       <td><select data-c="dye"><option value="">-</option><option value="OWN" ${c.dye === "OWN" ? "selected" : ""}>ย้อม</option><option value="HIRE" ${c.dye === "HIRE" ? "selected" : ""}>จ้าง</option></select></td>
-      <td><input data-c="remark" value="${esc(c.remark)}"></td><td class="chk" data-c="chk"></td>
+      <td><input data-c="remark" value="${esc(c.remark)}"></td>
+      <td><select data-c="matching" title="เว้นว่าง = เดาอัตโนมัติจาก Pile Texture ของ M/O นี้">${MATCHING_OPTS.map((o) => `<option value="${o[0]}" ${c.matching === o[0] ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select></td>
+      <td class="chk" data-c="chk"></td>
       <td><button type="button" class="action-button ghost" data-mo="del-col" data-i="${i}" title="ลบสีนี้">×</button></td></tr>`;
+  }
+  function refRowHtml(r, i) {
+    return `<tr data-ri="${i}"><td class="idx">${i + 1}</td>
+      <td><select data-r="type">${REF_TYPES.map((t) => `<option value="${t[0]}" ${(r.type || "SO") === t[0] ? "selected" : ""}>${esc(t[1])}</option>`).join("")}</select></td>
+      <td><input data-r="no" value="${esc(r.no || "")}" placeholder="เช่น 0369/26 หรือข้อความอ้างอิง"></td>
+      <td><button type="button" class="action-button ghost" data-mo="del-ref" data-i="${i}" title="ลบรายการนี้">×</button></td></tr>`;
   }
   function editorHtml(doc) {
     const f = doc.form || {}, sp = specOf(doc), guess = !f.spec;
     let cols = (f.colors || []).map((c) => ({ ...c }));
     if (!cols.length) { const n = Math.min(MAX_COLORS, Math.max(1, parseInt((doc.lines || [])[0] && doc.lines[0].colors, 10) || 1)); cols = Array.from({ length: n }, () => ({})); }
+    let refs = refRowsForDoc(doc).map((r) => ({ ...r }));
+    if (!refs.length) refs = [{ type: "SO", no: "" }];
     const codes = CE() ? CE().getCodes() : [];
     const inp = (k, ph, type = "text") => `<label>${ph[0]}<input data-k="${k}" type="${type}" ${type === "number" ? 'step="any"' : ""} value="${esc(f[k] == null ? "" : f[k])}" placeholder="${esc(ph[1] || "")}"></label>`;
     return `<details class="mo-ed" id="moEd" ${f.spec || (f.colors && f.colors.length) ? "open" : ""}>
       <summary>ข้อมูลใบ M/O A3 สำหรับ Planning — Specs · โค้ดสี · ตรวจสี${f.colors && f.colors.length ? ` <em>(${f.colors.length} สี)</em>` : ""}</summary>
       <div class="mo-ed-body">
         <div class="mo-grid">
-          ${inp("refSo", ["อ้างถึง / Ref. S/O", "ค่าเริ่มต้น: เลข S/O จากคอลัมน์อ้างอิงของรายการ"])}${inp("productCode", ["Product Code"])}${inp("delivery", ["กำหนดส่ง / Delivery", "ค่าเริ่มต้น: " + (autoDelivery(doc) || "วันที่ Dispatch/Postpone ล่าสุด")])}
+          ${inp("productCode", ["Product Code"])}${inp("delivery", ["กำหนดส่ง / Delivery", "ค่าเริ่มต้น: " + (autoDelivery(doc) || "วันที่ Dispatch/Postpone ล่าสุด")])}
           ${inp("po", ["PO# (หน้า 2)", "ค่าเริ่มต้น: รหัสแรกของ Project / PO"])}${inp("quality", ["คุณภาพ / Quality", "ค่าเริ่มต้น: จากรายการ"])}${inp("designNo", ["Design / PAT.", "ค่าเริ่มต้น: จากรายการ"])}
           ${inp("specSqm", ["Spec. (กก./ตร.ม.)"], "number")}${inp("preparedBy", ["จัดทำโดย"])}${inp("approvedBy", ["อนุมัติโดย (Sale Manager)"])}
         </div>
+        <div class="mo-refhead"><b>อ้างถึง / Ref. (POM · S/O · M/O · อื่นๆ)</b> <span class="mo-note">ค่าเริ่มต้น: ดึงจากคอลัมน์อ้างอิงของรายการ — เพิ่ม/ลบ/แก้ไขได้ตามต้องการ ไม่จำกัดจำนวน</span></div>
+        <div class="tw"><table class="mo-col mo-ref"><thead><tr><th>#</th><th>ประเภท</th><th>เลขที่ / ข้อความ</th><th></th></tr></thead><tbody id="moRefBody">${refs.map(refRowHtml).join("")}</tbody></table></div>
+        <div class="mo-actions"><button type="button" class="action-button add" data-mo="add-ref">+ เพิ่มอ้างอิง</button></div>
         <p class="mo-note">${guess ? "ระบบเลือกให้เฉพาะที่มีคำระบุในรายการ (เช่น CUT/LOOP, แกะลาย, ตลาดส่งออก/ในประเทศ) — ตรวจสอบก่อนพิมพ์" : "ติ๊กตามสเปกของงาน — คลิกซ้ำเพื่อยกเลิกตัวเลือก"}</p>
         <div class="mo-specs">${group("type", sp)}${group("yarn", sp)}<div class="mo-grp"><b>Yarn อื่น ๆ (ระบุ)</b><div><input data-spec="yarnOther" value="${esc(sp.yarnOther)}" placeholder="ระบุชนิดเส้นด้าย"></div></div>${group("pile", sp)}${group("surface", sp)}${group("sub", sp)}${group("backing", sp)}${group("label", sp)}${group("packing", sp)}</div>
-        <div class="mo-colhead"><b>สี / โค้ดสี (Matching)</b> <span class="mo-note">พิมพ์โค้ด POM เช่น CC012 หรือ 6001 — ระบบตรวจกับทะเบียนโค้ดสีทันที · ใส่สีของแบบ (#hex) เพื่อเทียบ ΔE กับสีอ้างอิง · ส่งออกลงหน้า 1 (20 สีแรก) และหน้า 2</span></div>
+        <div class="mo-colhead"><b>สี / โค้ดสี</b> <span class="mo-note">พิมพ์โค้ด POM เช่น CC012 หรือ 6001 — ระบบตรวจกับทะเบียนโค้ดสีทันที · ใส่สีของแบบ (#hex) เพื่อเทียบ ΔE กับสีอ้างอิง · โค้ดสีนี้จะพิมพ์ลงคอลัมน์ "No." ของหน้า 1 (แทนเลขลำดับ) · Matching (C TO C/S TO C/C TO S/S TO S) เว้นว่าง = เดาอัตโนมัติจาก Pile Texture ด้านล่าง แก้เองต่อแถวได้</span></div>
         <datalist id="moCodeList">${codes.map((c) => `<option value="${esc(c.code)}">${esc(c.name || c.series)}</option>`).join("")}</datalist>
-        <div class="tw"><table class="mo-col"><thead><tr><th>#</th><th>โค้ดสี (Matching)</th><th>ชื่อสี</th><th>สีของแบบ</th><th>ก.ก.</th><th title="Daylight">DL</th><th title="Fluorescent">F</th><th title="Incandescent">I</th><th>ย้อม/จ้าง</th><th>รายละเอียด (กรอ/ตีเกลียว)</th><th>ผลตรวจโค้ดสี</th><th></th></tr></thead><tbody id="moColBody">${cols.map(colRowHtml).join("")}</tbody></table></div>
+        <div class="tw"><table class="mo-col"><thead><tr><th>#</th><th>โค้ดสี</th><th>ชื่อสี</th><th>สีของแบบ</th><th>ก.ก.</th><th title="Daylight">DL</th><th title="Fluorescent">F</th><th title="Incandescent">I</th><th>ย้อม/จ้าง</th><th>รายละเอียด (กรอ/ตีเกลียว)</th><th>Matching (เทียบสี)</th><th>ผลตรวจโค้ดสี</th><th></th></tr></thead><tbody id="moColBody">${cols.map(colRowHtml).join("")}</tbody></table></div>
         <div class="mo-actions"><button type="button" class="action-button add" data-mo="add-col">+ เพิ่มสี</button><span id="moColSum" class="mo-note"></span></div>
-        <div class="mo-grid"><label class="span3">คำนวณพื้นที่ (ข้อความในกล่องหน้า 1 — เว้นว่างให้ระบบสร้างจากรายการ)<textarea data-k="areaNote" rows="2">${esc(f.areaNote || "")}</textarea></label><label class="span3">Remark / คำสั่งพิเศษ (เว้นว่าง = หมายเหตุของ M/O + อ้างอิงรายการ)<textarea data-k="remark" rows="2">${esc(f.remark == null ? "" : f.remark)}</textarea></label></div>
+        <div class="mo-grid"><label class="span3">คำนวณพื้นที่ (ข้อความในกล่องหน้า 1 — เว้นว่างให้ระบบสร้างจากรายการ)<textarea data-k="areaNote" rows="2">${esc(f.areaNote || "")}</textarea></label><label class="span3">Remark / คำสั่งพิเศษ (เว้นว่าง = หมายเหตุของ M/O เท่านั้น — เลข S/O,M/O,POM ที่อ้างถึง ให้กรอกที่ตาราง "อ้างถึง / Ref." ด้านบนแทน ไม่ต้องซ้ำที่นี่)<textarea data-k="remark" rows="2">${esc(f.remark == null ? "" : f.remark)}</textarea></label></div>
         <div class="mo-actions"><button type="button" class="action-button" data-mo="preview">ดูตัวอย่าง / พิมพ์ใบ M/O A3</button><span class="mo-note">ตัวอย่างใช้ข้อมูลที่กรอกอยู่ในหน้าต่างนี้ (ยังไม่ต้องกดบันทึก)</span></div>
       </div></details>`;
   }
   function readColRow(tr) {
     const g = (k) => tr.querySelector(`[data-c="${k}"]`), v = (k) => (g(k) ? g(k).value.trim() : "");
     const hex = CE().parseHex(v("hex"));
-    return { code: v("code"), name: v("name"), hex: hex || v("hex"), kg: v("kg") === "" ? "" : Number(v("kg")), light: { DL: g("DL").checked, F: g("F").checked, I: g("I").checked }, dye: v("dye"), remark: v("remark") };
+    return { code: v("code"), name: v("name"), hex: hex || v("hex"), kg: v("kg") === "" ? "" : Number(v("kg")), light: { DL: g("DL").checked, F: g("F").checked, I: g("I").checked }, dye: v("dye"), remark: v("remark"), matching: v("matching") };
+  }
+  function readRefRow(tr) {
+    const g = (k) => tr.querySelector(`[data-r="${k}"]`), v = (k) => (g(k) ? g(k).value.trim() : "");
+    return { type: v("type") || "SO", no: v("no") };
   }
   function read(root) {
     root = root || document;
@@ -341,7 +394,8 @@
       else if (el.checked) { if (Array.isArray(spec[k])) spec[k].push(el.value); else spec[k] = el.value; }
     });
     f.spec = spec;
-    f.colors = $$("#moColBody tr", ed).map(readColRow).filter((c) => c.code || c.name || c.hex || c.kg !== "" || c.remark);
+    f.colors = $$("#moColBody tr", ed).map(readColRow).filter((c) => c.code || c.name || c.hex || c.kg !== "" || c.remark || c.matching);
+    f.refs = $$("#moRefBody tr", ed).map(readRefRow).filter((r) => r.no);
     return f;
   }
   function updateChk(tr) {
@@ -355,6 +409,7 @@
   }
   function refreshAll(root) { $$("#moColBody tr", root).forEach(updateChk); updateSum(root); }
   function reindex(root) { $$("#moColBody tr", root).forEach((tr, i) => { tr.dataset.ci = i; $(".idx", tr).textContent = i + 1; const b = $('[data-mo="del-col"]', tr); if (b) b.dataset.i = i; }); }
+  function reindexRef(root) { $$("#moRefBody tr", root).forEach((tr, i) => { tr.dataset.ri = i; $(".idx", tr).textContent = i + 1; const b = $('[data-mo="del-ref"]', tr); if (b) b.dataset.i = i; }); }
 
   /* ---------- events ---------- */
   document.addEventListener("input", (e) => {
@@ -382,6 +437,8 @@
       const body = $("#moColBody"); if (body.children.length >= MAX_COLORS) { toast(`ใส่ได้สูงสุด ${MAX_COLORS} สี (ตามช่องในฟอร์ม)`); return; }
       body.insertAdjacentHTML("beforeend", colRowHtml({}, body.children.length)); reindex(ed); $$("[data-c=code]", body).pop().focus();
     } else if (a === "del-col") { const tr = b.closest("tr"); if ($$("#moColBody tr", ed).length > 1) tr.remove(); else $$("input", tr).forEach((i) => { if (i.type === "checkbox") i.checked = false; else i.value = i.type === "color" ? "#cccccc" : ""; }); reindex(ed); refreshAll(ed); }
+    else if (a === "add-ref") { const body = $("#moRefBody"); body.insertAdjacentHTML("beforeend", refRowHtml({ type: "SO", no: "" }, body.children.length)); reindexRef(ed); $$('[data-r="no"]', body).pop().focus(); }
+    else if (a === "del-ref") { const tr = b.closest("tr"); const body = $("#moRefBody"); if ($$("#moRefBody tr", ed).length > 1) tr.remove(); else { const noEl = tr.querySelector('[data-r="no"]'); if (noEl) noEl.value = ""; } reindexRef(ed); }
     else if (a === "preview") { const d = window.SalesEngine && window.SalesEngine.collectDraft && window.SalesEngine.collectDraft(); if (d) openPrint(d); }
     else if (a === "blank") openPrint(null, { blank: true });
     else if (a === "print-doc") { const d = window.SalesEngine.getDocs().find((x) => x.id === b.dataset.id); if (d) openPrint(d); }
@@ -393,5 +450,5 @@
   // เติมผลตรวจเมื่อเปิดหน้าต่าง
   new MutationObserver(() => { const ed = $("#moEd"); if (ed && !ed.dataset.init) { ed.dataset.init = "1"; refreshAll(ed); } }).observe(document.body, { childList: true, subtree: true });
 
-  window.MoForm = { editorHtml, read, open: openPrint, close: closePrint, model, defaultSpec, summarize, fit, wrap, textWidth: tw, SPEC, P1, P2, page1, page2, sheetHtml };
+  window.MoForm = { editorHtml, read, open: openPrint, close: closePrint, model, defaultSpec, summarize, fit, wrap, textWidth: tw, SPEC, P1, P2, page1, page2, sheetHtml, REF_TYPES, MATCHING_OPTS, matchLabelOf, autoRefRows, refRowsForDoc };
 })();

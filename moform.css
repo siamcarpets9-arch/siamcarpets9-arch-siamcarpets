@@ -17,9 +17,10 @@
 .mo-grp>div{display:flex;flex-wrap:wrap;gap:4px 12px}
 .mo-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--ink);cursor:pointer;white-space:nowrap}
 .mo-chip input{width:auto!important;margin:0;accent-color:var(--teal)}
-.mo-colhead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-top:4px}
+.mo-colhead,.mo-refhead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-top:4px}
 .mo-ed .tw{overflow:auto;border:1px solid var(--line);background:#fff}
-.mo-col{min-width:940px;width:100%;border-collapse:collapse}
+.mo-col{min-width:1040px;width:100%;border-collapse:collapse}
+.mo-col.mo-ref{min-width:0;max-width:640px}
 .mo-col th{background:#f1f5f4;font-size:9px;padding:6px;text-align:left;white-space:nowrap}
 .mo-col td{padding:3px 4px;border-bottom:1px solid #edf1f0;vertical-align:middle}
 .mo-col td.idx{text-align:center;color:var(--muted);font-size:10px;width:26px}
@@ -70,3 +71,6 @@
 }
 .mo-col td:nth-child(9){min-width:76px}
 .mo-col td:nth-child(10) input{min-width:130px}
+.mo-col td:nth-child(11) select{min-width:104px}
+.mo-ref td:nth-child(2) select{min-width:84px}
+.mo-ref td:nth-child(3) input{min-width:220px}
