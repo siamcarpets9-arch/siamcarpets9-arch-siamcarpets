@@ -146,6 +146,7 @@
 .wfb-edit{flex-shrink:0;width:26px;height:26px;border:1px solid var(--line);background:#fff;color:var(--teal);cursor:pointer;font-size:12px}
 .wfb-img{width:100%;height:120px;object-fit:cover;border:1px solid var(--line);background:#f7faf9}
 .wfb-img-empty{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:9px;text-align:center;padding:8px}
+.wfb-note{padding:5px 8px;background:#fff8e6;border:1px solid #eddca4;color:#7a5c1e;font-size:10px}
 .wfb-weavers{display:flex;gap:6px;font-size:10px;align-items:baseline}
 .wfb-weavers small{color:var(--muted);font-weight:900;flex-shrink:0}
 .wfb-weavers span{color:var(--ink)}
@@ -158,6 +159,19 @@
 .wfb-progress{height:6px;background:#e9eeee}
 .wfb-progress-bar{height:100%;background:var(--teal)}
 .wfb-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--muted);font-size:9px}
+
+/* ประวัติการทอ — การ์ดสรุปแยกตามเกรด */
+.hist-grade-cards{display:flex;flex-wrap:wrap;gap:10px}
+.hist-grade-card{min-width:150px;padding:9px 12px;background:#f7faf9;border:1px solid var(--line);border-top:3px solid var(--teal)}
+.hist-grade-card.warn{border-top-color:var(--red)}
+.hist-grade-card>strong{display:block;font-size:11px;color:var(--ink)}
+.hist-grade-nums{display:flex;gap:9px;margin-top:5px;flex-wrap:wrap}
+.hist-grade-nums span{font-size:13px;font-weight:900;color:var(--ink)}
+.hist-grade-nums span small{margin-left:2px;font-size:9px;font-weight:400;color:var(--muted)}
+.hist-grade-nums span.pct{color:var(--teal)}
+.hist-grade-card.warn .hist-grade-nums span.pct{color:var(--red)}
+.hist-grand-total{margin:10px 2px 0;color:var(--ink);font-size:11px}
+.hist-grand-total strong{color:var(--teal)}
 
 @media(max-width:900px){
   .pw-row{flex-direction:column;align-items:stretch}

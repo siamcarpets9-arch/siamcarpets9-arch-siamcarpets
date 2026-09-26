@@ -48,7 +48,8 @@
   function saveDesignFloor(designId, rec) { const all = loadFloorAll(); all[designId] = rec; saveFloorAll(all); }
 
   function ensurePieceRec(dfloor, lineIdx) {
-    if (!dfloor.pieces[lineIdx]) dfloor.pieces[lineIdx] = { loomNo: "", gradeOverride: "", patternImage: "", days: {} };
+    if (!dfloor.pieces[lineIdx]) dfloor.pieces[lineIdx] = { loomNo: "", gradeOverride: "", patternImage: "", note: "", days: {} };
+    if (dfloor.pieces[lineIdx].note == null) dfloor.pieces[lineIdx].note = "";
     return dfloor.pieces[lineIdx];
   }
   function ensureDayRec(piece, iso) {
@@ -314,7 +315,11 @@
   /* ============================================================
      UI — แผนกทอ (จอทอรายวัน)
      ============================================================ */
-  const state = { tab: "setup", designId: null, lineIdx: null, day: todayIso(), workerMode: "day", workerDay: todayIso(), workerMonth: todayIso().slice(0, 7), workerYear: todayIso().slice(0, 4) };
+  const state = {
+    tab: "setup", designId: null, lineIdx: null, day: todayIso(),
+    workerMode: "day", workerDay: todayIso(), workerMonth: todayIso().slice(0, 7), workerYear: todayIso().slice(0, 4),
+    histMode: "month", histDay: todayIso(), histMonth: todayIso().slice(0, 7), histYear: todayIso().slice(0, 4), histMo: ""
+  };
 
   function field(label, inner) { return `<label class="pf">${label}${inner}</label>`; }
   function res(label, value, cls = "") { return `<div class="pr ${cls}"><small>${label}</small><strong>${value}</strong></div>`; }
@@ -323,7 +328,7 @@
   }
 
   function tabBar() {
-    const tabs = [["setup", "ตั้งค่าขึ้นทอ"], ["daily", "บันทึกประจำวัน"], ["board", "หน้าจอทอ (ภาพรวม)"], ["report", "สรุป/ส่งออก/แจ้งเตือน"]];
+    const tabs = [["setup", "ตั้งค่าขึ้นทอ"], ["daily", "บันทึกประจำวัน"], ["board", "หน้าจอทอ (ภาพรวม)"], ["history", "ประวัติการทอ/เทียบเกรด"], ["report", "สรุป/ส่งออก/แจ้งเตือน"]];
     return `<div class="control-strip"><div class="segmented">${tabs.map(([k, l]) => `<button type="button" class="view-btn ${state.tab === k ? "active" : ""}" data-wftab="${k}">${l}</button>`).join("")}</div></div>`;
   }
 
@@ -359,6 +364,7 @@
           ${field("เกรดทอ (ว่าง = อัตโนมัติจากใบวางแผนงาน)", `<select data-pf="gradeOverride"><option value="">อัตโนมัติ (${esc(grade)})</option>${(PE().WEAVE_GRADES || []).map((g) => `<option value="${esc(g.grade)}" ${piece.gradeOverride === g.grade ? "selected" : ""}>${esc(g.grade)}</option>`).join("")}</select>`)}
           ${field("แนบรูปแบบพรม (เก็บในเบราว์เซอร์นี้เท่านั้น)", `<input type="file" accept="image/*" data-pf="patternImageFile">`)}
         </div>
+        <div class="pw-row">${field("โน้ต/หมายเหตุประจำจอ (แสดงในหน้าจอทอภาพรวม)", `<input data-pf="note" value="${esc(piece.note)}" placeholder="เช่น รอเปลี่ยนหัวเข็ม, ระวังสีเพี้ยน ฯลฯ" style="min-width:320px">`)}</div>
         ${piece.patternImage ? `<div class="pw-row"><img src="${piece.patternImage}" alt="แบบพรม" style="max-width:140px;border:1px solid var(--line)"><button type="button" class="action-button" data-pf-clear-image>ลบรูป</button></div>` : ""}
       </div>
     </div>`;
@@ -552,6 +558,9 @@
       const actualEff = totalMh > 0 ? done / totalMh : 0;
       const gradeInfo = grades.find((g) => g.grade === r.grade);
       const pctVsGrade = gradeInfo && gradeInfo.rateSqmPerHr > 0 ? (actualEff / gradeInfo.rateSqmPerHr) * 100 : null;
+      const lastWorkedIso = workedDates[workedDates.length - 1];
+      const lastDay = lastWorkedIso ? r.piece.days[lastWorkedIso] : null;
+      const lastMh = lastDay ? shiftManHours(lastDay.normal) + shiftManHours(lastDay.ot) : 0;
 
       return `<div class="wfb-card">
         <div class="wfb-head">
@@ -568,12 +577,13 @@
           <button type="button" class="wfb-edit" data-goto-daily="${esc(r.designId)}" data-goto-line="${esc(r.lineIdx)}" title="ไปที่บันทึกประจำวันของจอนี้">✎</button>
         </div>
         ${r.piece.patternImage ? `<img class="wfb-img" src="${r.piece.patternImage}" alt="แบบพรม">` : `<div class="wfb-img wfb-img-empty">ยังไม่แนบรูปแบบ (แนบได้ที่แท็บ “ตั้งค่าขึ้นทอ”)</div>`}
+        ${r.piece.note ? `<div class="wfb-note">📝 ${esc(r.piece.note)}</div>` : ""}
         <div class="wfb-weavers"><small>คนทอ</small><span>${allWeavers.size ? [...allWeavers].map((w) => esc(w)).join(", ") : "ยังไม่มีบันทึก"}</span></div>
         <div class="wfb-stats">
           <div class="wfb-stat main"><small>เกรด</small><strong>${esc(r.grade || "-")}</strong></div>
-          <div class="wfb-stat${pctVsGrade != null && pctVsGrade < 90 ? " warn" : ""}"><small>% เทียบเกรด (มาตรฐาน)</small><strong>${pctVsGrade != null ? fmt(pctVsGrade, 1) + "%" : "-"}</strong></div>
-          <div class="wfb-stat"><small>ใช้เวลารวม</small><strong>${fmt(totalMh, 1)} ชม.</strong></div>
-          <div class="wfb-stat"><small>จำนวนวันที่ทอ</small><strong>${workedDates.length} วัน</strong></div>
+          <div class="wfb-stat${pctVsGrade != null && pctVsGrade < 90 ? " warn" : ""}"><small>% เทียบเกรด (M/O นี้)</small><strong>${pctVsGrade != null ? fmt(pctVsGrade, 1) + "%" : "-"}</strong></div>
+          <div class="wfb-stat"><small>ใช้เวลาล่าสุด</small><strong>${fmt(lastMh, 1)} ชม.</strong></div>
+          <div class="wfb-stat"><small>ระยะเวลาทำงาน</small><strong>${workedDates.length} วัน</strong></div>
         </div>
         <div class="wfb-progress"><div class="wfb-progress-bar" style="width:${donePct}%"></div></div>
         <div class="wfb-stats">
@@ -585,13 +595,132 @@
           <div class="wfb-stat${todaySqm > 0 ? " main" : ""}"><small>ทำได้วันนี้</small><strong>${fmt(todaySqm, 2)}</strong></div>
           <div class="wfb-stat"><small>ยกไปวันถัดไป</small><strong>${fmt(remain, 2)}</strong></div>
         </div>
-        <div class="wfb-foot"><small>บันทึกล่าสุด ${lastIso ? thaiDate(lastIso) : "ยังไม่บันทึก"}</small></div>
+        <div class="wfb-foot"><small>รวมบอบนี้ ${fmt(done, 2)} ตร.ม. (ล่าสุด ${lastIso ? thaiDate(lastIso) : "ยังไม่บันทึก"})</small></div>
         <div class="pw-save-bar">
           <button type="button" class="action-button primary" data-transfer-glue="${esc(r.designId)}" data-transfer-line="${esc(r.lineIdx)}" ${remain > 0.0005 ? "disabled" : ""}>โอนให้แผนกทากาวตกแต่ง</button>
           ${r.piece.transferredToGlueAt ? `<small>โอนแล้ว ${new Date(r.piece.transferredToGlueAt).toLocaleString("th-TH")}</small>` : `<small>${remain > 0.0005 ? "ทอยังไม่เสร็จ" : "ยังไม่โอน"}</small>`}
         </div>
       </div>`;
     }).join("")}</div>`;
+  }
+
+  /* ---------------- Tab: ประวัติการทอทั้งหมด — เทียบ % กับเกรดการทอ ---------------- */
+  // แถวเดียวต่อ "จอ/ชิ้น ต่อวัน" (รวมปกติ+โอทีเป็นยอดเดียว) — ใช้เป็นฐานของทั้งการ์ดสรุปเกรด, ตารางสรุปตามช่วงเวลา และตารางรายการละเอียด
+  function historyRows() {
+    const rows = [];
+    allPieceRefs().forEach((r) => {
+      sortedDates(r.piece).forEach((iso) => {
+        const day = r.piece.days[iso];
+        const nSqm = num(day.normal.doneSqm), oSqm = num(day.ot.doneSqm);
+        const nMh = shiftManHours(day.normal), oMh = shiftManHours(day.ot);
+        const sqm = nSqm + oSqm, mh = nMh + oMh;
+        if (sqm <= 0 && mh <= 0) return; // วันที่ยังไม่มีการบันทึกผลจริง ไม่นับเป็นประวัติ
+        const workers = [...new Set([...(day.normal.workers || []), ...(day.ot.workers || [])])];
+        rows.push({
+          designId: r.designId, lineIdx: r.lineIdx, loomNo: r.piece.loomNo || "-",
+          moNo: (r.plan && r.plan.moNo) || r.designId, quality: (r.line && r.line.quality) || "",
+          grade: r.grade || "", iso, sqm, mh, eff: mh > 0 ? sqm / mh : 0, workers
+        });
+      });
+    });
+    rows.sort((a, b) => b.iso.localeCompare(a.iso) || String(a.loomNo).localeCompare(String(b.loomNo), "th", { numeric: true }));
+    return rows;
+  }
+
+  function pctVsGradeOf(grade, eff) {
+    const g = (PE().WEAVE_GRADES || []).find((x) => x.grade === grade);
+    return g && g.rateSqmPerHr > 0 ? (eff / g.rateSqmPerHr) * 100 : null;
+  }
+
+  function historyGradeCardsHtml(rows) {
+    const grades = PE().WEAVE_GRADES || [];
+    const totals = {};
+    let allSqm = 0, allMh = 0;
+    rows.forEach((r) => {
+      if (!totals[r.grade]) totals[r.grade] = { sqm: 0, mh: 0 };
+      totals[r.grade].sqm += r.sqm; totals[r.grade].mh += r.mh;
+      allSqm += r.sqm; allMh += r.mh;
+    });
+    const order = (g) => { const i = grades.findIndex((x) => x.grade === g); return i < 0 ? 999 : i; };
+    const cards = Object.keys(totals).sort((a, b) => order(a) - order(b)).map((g) => {
+      const t = totals[g], eff = t.mh > 0 ? t.sqm / t.mh : 0, pct = pctVsGradeOf(g, eff);
+      return `<div class="hist-grade-card${pct != null && pct < 90 ? " warn" : ""}">
+        <strong>เกรด ${esc(g || "-")}</strong>
+        <div class="hist-grade-nums"><span>${fmt(t.sqm, 2)} <small>ตร.ม.</small></span><span>${fmt(t.mh, 1)} <small>ชม.</small></span><span class="pct">${pct != null ? fmt(pct, 1) : "-"}<small>%</small></span></div>
+      </div>`;
+    }).join("");
+    const overallEff = allMh > 0 ? allSqm / allMh : 0;
+    return `<div class="hist-grade-cards">${cards || `<p class="col-empty">ยังไม่มีข้อมูลการทอ</p>`}</div>
+      <p class="hist-grand-total">รวมทั้งหมด: <strong>${fmt(allSqm, 2)} ตร.ม.</strong> · <strong>${fmt(allMh, 1)} ชม.</strong> · ประสิทธิภาพรวม <strong>${fmt(overallEff, 4)} ตรม./คน/ชม.</strong></p>`;
+  }
+
+  function periodKeyOf(iso, mode) { return mode === "year" ? iso.slice(0, 4) : mode === "day" ? iso : iso.slice(0, 7); }
+  function periodLabelOf(key, mode) { return mode === "year" ? key : mode === "day" ? thaiDate(key) : new Date(key + "-01T00:00:00").toLocaleDateString("th-TH", { month: "short", year: "numeric" }); }
+
+  function historyPeriodTableHtml(rows) {
+    const mode = state.histMode || "month";
+    const groups = {};
+    rows.forEach((r) => {
+      const key = periodKeyOf(r.iso, mode);
+      if (!groups[key]) groups[key] = { count: 0, sqm: 0, mh: 0 };
+      groups[key].count++; groups[key].sqm += r.sqm; groups[key].mh += r.mh;
+    });
+    const keys = Object.keys(groups).sort().reverse();
+    return `<div class="pw-row">
+        <label class="pf">สรุปยอดรวมตามช่วงเวลา
+          <select data-hist-mode>
+            <option value="day" ${mode === "day" ? "selected" : ""}>รายวัน</option>
+            <option value="month" ${mode === "month" ? "selected" : ""}>รายเดือน</option>
+            <option value="year" ${mode === "year" ? "selected" : ""}>รายปี</option>
+          </select>
+        </label>
+      </div>
+      ${keys.length ? `<table class="calc-table"><thead><tr><th>ช่วงเวลา</th><th class="num">จำนวนรายการ</th><th class="num">ตร.ม. รวม</th><th class="num">ชม. รวม (คน-ชม.)</th></tr></thead><tbody>
+        ${keys.map((k) => `<tr><td>${esc(periodLabelOf(k, mode))}</td><td class="num">${groups[k].count}</td><td class="num">${fmt(groups[k].sqm, 2)}</td><td class="num">${fmt(groups[k].mh, 2)}</td></tr>`).join("")}
+      </tbody></table>` : `<p class="col-empty">ไม่มีข้อมูล</p>`}`;
+  }
+
+  function historyDetailTableHtml(rows) {
+    const moList = [...new Set(rows.map((r) => r.moNo))].sort();
+    const filtered = state.histMo ? rows.filter((r) => r.moNo === state.histMo) : rows;
+    return `<div class="pw-row">
+        <label class="pf">กรองตาม M/O
+          <select data-hist-mo>
+            <option value="">ทั้งหมด (${rows.length} รายการ)</option>
+            ${moList.map((m) => `<option value="${esc(m)}" ${state.histMo === m ? "selected" : ""}>${esc(m)}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      ${filtered.length ? `<div class="table-wrap"><table class="calc-table"><thead><tr><th>วันที่</th><th>จอ</th><th>M/O</th><th>คุณภาพ</th><th>เกรด</th><th class="num">ตร.ม.</th><th class="num">ชม.(คน-ชม.)</th><th class="num">ประสิทธิภาพ</th><th class="num">% เทียบเกรด</th><th>พนักงาน</th><th>จัดการ</th></tr></thead><tbody>
+        ${filtered.map((r) => {
+      const pct = pctVsGradeOf(r.grade, r.eff);
+      return `<tr>
+            <td>${thaiDate(r.iso)}</td><td>${esc(r.loomNo)}</td><td>${esc(r.moNo)}</td><td>${esc(r.quality)}</td><td>${esc(r.grade || "-")}</td>
+            <td class="num">${fmt(r.sqm, 2)}</td><td class="num">${fmt(r.mh, 2)}</td><td class="num">${fmt(r.eff, 3)}</td>
+            <td class="num${pct != null && pct < 90 ? " pw-dye-warn" : ""}">${pct != null ? fmt(pct, 1) + "%" : "-"}</td>
+            <td>${esc(r.workers.join(", ") || "-")}</td>
+            <td><button type="button" class="wfb-edit" data-goto-daily="${esc(r.designId)}" data-goto-line="${esc(r.lineIdx)}" data-goto-day="${esc(r.iso)}" title="แก้ไขวันนี้">✎</button>
+              <button type="button" class="pw-worker-x" data-del-hist="${esc(r.designId)}" data-del-hist-line="${esc(r.lineIdx)}" data-del-hist-day="${esc(r.iso)}" title="ลบบันทึกวันนี้">×</button></td>
+          </tr>`;
+    }).join("")}
+      </tbody></table></div>` : `<p class="col-empty">ไม่มีข้อมูลตรงตามตัวกรอง</p>`}`;
+  }
+
+  function historyTabHtml() {
+    const rows = historyRows();
+    return `
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>ประวัติการทอทั้งหมด — เทียบ % กับเกรดการทอ</strong><small>รวมทุกจอ/ทุก M/O ที่เคยบันทึกผล — % เทียบเกรด คำนวณจากประสิทธิภาพจริง (ตร.ม./คน/ชม.) เทียบกับอัตรามาตรฐานของเกรดนั้นในใบวางแผนงาน</small></div></div>
+      <div class="pw-body">${historyGradeCardsHtml(rows)}</div>
+    </section>
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>สรุปยอดรวมตามช่วงเวลา</strong><small>เลือกดูแบบรายวัน/รายเดือน/รายปี</small></div></div>
+      <div class="pw-body">${historyPeriodTableHtml(rows)}</div>
+    </section>
+    <section class="department-panel pw-card wide">
+      <div class="panel-heading"><div><strong>รายการละเอียดรายวันต่อจอ</strong><small>กรองดูเฉพาะ M/O ใดหนึ่งได้ — แก้ไข/ลบรายการย้อนหลังได้จากที่นี่</small></div></div>
+      <div class="pw-body">${historyDetailTableHtml(rows)}</div>
+    </section>`;
   }
 
   /* ---------------- Tab 4: สรุป/ส่งออก/แจ้งเตือน ---------------- */
@@ -862,15 +991,16 @@
           if (!piece.loomNo && has(row[1])) piece.loomNo = String(row[1]);
           if (!piece.gradeOverride && has(row[4])) piece.gradeOverride = String(row[4]).trim(); // เกรดจริงจากรายงาน (คอลัมน์ E)
           const day = ensureDayRec(piece, iso);
-          // คอลัมน์ตามฟอร์แมต SEP: 8=คงเหลือยกมา(ปกติ) 9=พ.ท.ทำได้ 11=จำนวนพนักงาน 12=เริ่ม 13=เลิก 17=รายชื่อ ; OT: 18.. 27=รายชื่อ
+          // คอลัมน์ตรงกับหัวตารางที่ exportExcel() เขียนไว้ (0-based ตาม header1 ด้านล่าง):
+          // 9=ปกติ:พ.ท.ทำได้ 12=ปกติ:เริ่ม 13=ปกติ:เลิก 16=ปกติ:รายชื่อพนักงาน ; 18=โอที:พ.ท.ทำได้ 21=โอที:เริ่ม 22=โอที:เลิก 25=โอที:รายชื่อพนักงาน
           if (has(row[9])) day.normal.doneSqm = num(row[9]);
           if (has(row[12])) day.normal.start = String(row[12]);
           if (has(row[13])) day.normal.end = String(row[13]);
-          if (has(row[17])) day.normal.workers = String(row[17]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
-          if (has(row[19])) day.ot.doneSqm = num(row[19]);
-          if (has(row[22])) day.ot.start = String(row[22]);
-          if (has(row[23])) day.ot.end = String(row[23]);
-          if (has(row[27])) day.ot.workers = String(row[27]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+          if (has(row[16])) day.normal.workers = String(row[16]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+          if (has(row[18])) day.ot.doneSqm = num(row[18]);
+          if (has(row[21])) day.ot.start = String(row[21]);
+          if (has(row[22])) day.ot.end = String(row[22]);
+          if (has(row[25])) day.ot.workers = String(row[25]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
           saveDesignFloor(designId, dfloor);
           imported++;
         });
@@ -926,13 +1056,14 @@
 
   function renderAll() {
     $("#wfRoster").innerHTML = sharedRosterHtml();
-    if (state.tab !== "board") $("#wfJobPicker").closest("section").style.display = "";
-    else $("#wfJobPicker").closest("section").style.display = "none";
+    if (state.tab === "board" || state.tab === "history") $("#wfJobPicker").closest("section").style.display = "none";
+    else $("#wfJobPicker").closest("section").style.display = "";
     $("#wfJobPicker").innerHTML = jobPickerHtml("wfpick");
     let html = "";
     if (state.tab === "setup") html = setupTabHtml();
     else if (state.tab === "daily") html = dailyTabHtml();
     else if (state.tab === "board") html = boardTabHtml();
+    else if (state.tab === "history") html = historyTabHtml();
     else if (state.tab === "report") html = reportTabHtml();
     $("#wfTabBody").innerHTML = html;
     $$(".view-btn[data-wftab]").forEach((b) => b.classList.toggle("active", b.dataset.wftab === state.tab));
@@ -980,7 +1111,19 @@
       if (gotoDaily) {
         state.designId = gotoDaily.dataset.gotoDaily;
         state.lineIdx = gotoDaily.dataset.gotoLine;
+        if (gotoDaily.dataset.gotoDay) state.day = gotoDaily.dataset.gotoDay;
         state.tab = "daily";
+        renderAll(); return;
+      }
+      const delHist = e.target.closest("[data-del-hist]");
+      if (delHist) {
+        const designId = delHist.dataset.delHist, lineIdx = delHist.dataset.delHistLine, iso = delHist.dataset.delHistDay;
+        if (!confirm(`ยืนยันลบบันทึกการทอวันที่ ${thaiDate(iso)} ของจอนี้ — ข้อมูลปกติ+โอทีของวันนี้จะหายไปทั้งหมด`)) return;
+        const dfloor = ensureDesignFloor(designId);
+        const piece = ensurePieceRec(dfloor, lineIdx);
+        delete piece.days[iso];
+        saveDesignFloor(designId, dfloor);
+        toast("ลบบันทึกวันนี้แล้ว");
         renderAll(); return;
       }
       const clearImg = e.target.closest("[data-pf-clear-image]");
@@ -1138,6 +1281,8 @@
       if (e.target.matches("[data-wf-worker-day]")) { state.workerDay = e.target.value; renderAll(); return; }
       if (e.target.matches("[data-wf-worker-month]")) { state.workerMonth = e.target.value; renderAll(); return; }
       if (e.target.matches("[data-wf-worker-year]")) { state.workerYear = e.target.value; renderAll(); return; }
+      if (e.target.matches("[data-hist-mode]")) { state.histMode = e.target.value; renderAll(); return; }
+      if (e.target.matches("[data-hist-mo]")) { state.histMo = e.target.value; renderAll(); return; }
       const salaryInput = e.target.closest("[data-weaver-salary]");
       if (salaryInput) { setWeaveSalary(salaryInput.dataset.weaverSalary, salaryInput.value); renderAll(); return; }
     });
