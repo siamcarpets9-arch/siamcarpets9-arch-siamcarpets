@@ -567,18 +567,18 @@
           <div class="wfb-loom"><small>จอที่</small><strong>${esc(r.piece.loomNo || "?")}</strong></div>
           <div class="wfb-headinfo">
             <div class="wfb-badges">
-              <span class="ovw-type ovw-type-${type}">${type}</span>
+              <span class="ovw-type ovw-type-${type}">${type === "SO" ? "S/O" : "M/O"}</span>
               <span class="wfb-market">${esc(market)}</span>
               <strong>${esc(r.plan.moNo || r.designId)}</strong>
             </div>
             <div class="wfb-cust">${esc(design.customer || "-")}</div>
-            <small class="wfb-due">กำหนดส่ง: ${esc(design.due || "-")} · ${esc(r.line.location || "-")}</small>
+            <small class="wfb-due">กำหนดเสร็จ: ${esc(design.due || "-")} · ${esc(r.line.location || "-")}</small>
           </div>
           <button type="button" class="wfb-edit" data-goto-daily="${esc(r.designId)}" data-goto-line="${esc(r.lineIdx)}" title="ไปที่บันทึกประจำวันของจอนี้">✎</button>
         </div>
         ${r.piece.patternImage ? `<img class="wfb-img" src="${r.piece.patternImage}" alt="แบบพรม">` : `<div class="wfb-img wfb-img-empty">ยังไม่แนบรูปแบบ (แนบได้ที่แท็บ “ตั้งค่าขึ้นทอ”)</div>`}
-        ${r.piece.note ? `<div class="wfb-note">📝 ${esc(r.piece.note)}</div>` : ""}
-        <div class="wfb-weavers"><small>คนทอ</small><span>${allWeavers.size ? [...allWeavers].map((w) => esc(w)).join(", ") : "ยังไม่มีบันทึก"}</span></div>
+        <div class="wfb-note-line">Note : ${esc(r.piece.note || "")}</div>
+        <div class="wfb-weavers"><small>👤</small><span>${allWeavers.size ? [...allWeavers].map((w) => esc(w)).join(", ") : "ยังไม่มีบันทึก"}</span></div>
         <div class="wfb-stats">
           <div class="wfb-stat main"><small>เกรด</small><strong>${esc(r.grade || "-")}</strong></div>
           <div class="wfb-stat${pctVsGrade != null && pctVsGrade < 90 ? " warn" : ""}"><small>% เทียบเกรด (M/O นี้)</small><strong>${pctVsGrade != null ? fmt(pctVsGrade, 1) + "%" : "-"}</strong></div>
@@ -595,7 +595,7 @@
           <div class="wfb-stat${todaySqm > 0 ? " main" : ""}"><small>ทำได้วันนี้</small><strong>${fmt(todaySqm, 2)}</strong></div>
           <div class="wfb-stat"><small>ยกไปวันถัดไป</small><strong>${fmt(remain, 2)}</strong></div>
         </div>
-        <div class="wfb-foot"><small>รวมบอบนี้ ${fmt(done, 2)} ตร.ม. (ล่าสุด ${lastIso ? thaiDate(lastIso) : "ยังไม่บันทึก"})</small></div>
+        <div class="wfb-foot"><small>📍 รวมบอบนี้ ${fmt(done, 2)} ตร.ม. (ล่าสุด ${lastIso ? thaiDate(lastIso) : "ยังไม่บันทึก"})</small></div>
         <div class="pw-save-bar">
           <button type="button" class="action-button primary" data-transfer-glue="${esc(r.designId)}" data-transfer-line="${esc(r.lineIdx)}" ${remain > 0.0005 ? "disabled" : ""}>โอนให้แผนกทากาวตกแต่ง</button>
           ${r.piece.transferredToGlueAt ? `<small>โอนแล้ว ${new Date(r.piece.transferredToGlueAt).toLocaleString("th-TH")}</small>` : `<small>${remain > 0.0005 ? "ทอยังไม่เสร็จ" : "ยังไม่โอน"}</small>`}
