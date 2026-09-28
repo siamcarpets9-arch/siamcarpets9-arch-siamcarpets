@@ -23,10 +23,13 @@
   const KEY_LOG = "siam-dyeing-execution-log";      // [{id,date,seq,orderRaw,orderType,orders:[],yarnType,lotNo,isSurplus,colourNo,colourCode,hang,batchNo,kg,remark,isExtra,isColorFix}]
   const KEY_DAY_TOTALS = "siam-dyeing-day-totals";  // { [iso]: {reportedKg, reportedColors, computedKg, computedColors} } — ไว้ตรวจทานยอดกับที่ฟอร์มสรุปไว้เอง
 
-  // เลข M/O,S/O เทียบกันได้แม้เขียนต่างรูปแบบ (เว้นวรรค/เลข 0 นำหน้า) — ใช้กติกาเดียวกับหน้า "แผนกทอ" (weave-floor.js)
+  // เลข M/O,S/O เทียบกันได้แม้เขียนต่างรูปแบบ (เว้นวรรค/เลข 0 นำหน้า/คำนำหน้าประเภทเอกสาร) — ใช้กติกาเดียวกับหน้า "แผนกทอ" (weave-floor.js)
   function normMoKey(raw) {
-    const s = String(raw || "").trim().toUpperCase();
-    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*\/\s*0*(\d+)/);
+    let s = String(raw || "").trim().toUpperCase();
+    // ตัดคำนำหน้า "ประเภทเอกสาร" ออกก่อน (MO/M-O/SO/S-O ตามด้วยเว้นวรรคหรือไม่ก็ได้) — บางหน้า (เช่นรายงานขาย)
+    // คีย์เลขที่โดยใส่ประเภทเอกสารนำหน้าด้วย เช่น "MO 0148/26" ในขณะที่รายงานผลิตมีแค่ "148/26" เฉยๆ
+    s = s.replace(/^(M\/O|S\/O|MO|SO)[\s.:-]*/, "");
+    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*[/.-]\s*0*(\d+)/);
     if (!m) return s.replace(/\s+/g, "");
     const [, prefix, num2, yy] = m;
     return `${prefix}|${num2}|${yy}`;

@@ -111,8 +111,9 @@
   /* ---------- M/O matching (คัดลอกมาปรับใช้ 3 รูปแบบ ตามไฟล์ต้นทางเดิม เพื่อคงพฤติกรรมการจับคู่เดิมทุกประการ) ---------- */
   // รูปแบบที่ 1: KPI แผนกย้อม + แผนกวางแผน (เดิมอยู่ planning.js) — ต้องตัดคำนำหน้า "M/O " ออกก่อนเทียบเสมอ
   function normMoKeyDyePlan(raw) {
-    const s = String(raw || "").trim().toUpperCase().replace(/^M\/O\s*/, "");
-    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*\/\s*0*(\d+)/);
+    let s = String(raw || "").trim().toUpperCase();
+    s = s.replace(/^(M\/O|S\/O|MO|SO)[\s.:-]*/, "");
+    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*[/.-]\s*0*(\d+)/);
     if (!m) return s.replace(/\s+/g, "");
     const [, prefix, num2, yy] = m;
     return `${prefix}|${num2}|${yy}`;
@@ -128,8 +129,9 @@
   }
   // รูปแบบที่ 2: KPI ขยายลาย/เจาะลาย (เดิมอยู่ pattern.js) — ไม่มีคำนำหน้า "M/O " ในข้อมูลต้นทาง จึงไม่ต้องตัด
   function normMoKeyPattern(raw) {
-    const s = String(raw || "").trim().toUpperCase();
-    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*\/\s*0*(\d+)/);
+    let s = String(raw || "").trim().toUpperCase();
+    s = s.replace(/^(M\/O|S\/O|MO|SO)[\s.:-]*/, "");
+    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*[/.-]\s*0*(\d+)/);
     if (!m) return s.replace(/\s+/g, "");
     const [, prefix, num2, yy] = m;
     return `${prefix}|${num2}|${yy}`;
@@ -145,8 +147,9 @@
   }
   // รูปแบบที่ 3: KPI แผนกตกแต่ง/ทากาว (เดิมอยู่ finishing.js) — ไฟล์บางไฟล์เขียน "M/O 109/26" / "S/O 12/26" ต้องตัดคำนำหน้าทั้งสองแบบ
   function normMoKeyFinishing(raw) {
-    const s = String(raw || "").replace(/^[MS]\/O\s*/i, "").trim().toUpperCase();
-    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*\/\s*0*(\d+)/);
+    let s = String(raw || "").trim().toUpperCase();
+    s = s.replace(/^(M\/O|S\/O|MO|SO)[\s.:-]*/, "");
+    const m = s.match(/^([A-Z]*)\s*0*(\d+)\s*[/.-]\s*0*(\d+)/);
     if (!m) return s.replace(/\s+/g, "");
     const [, prefix, num2, yy] = m;
     return `${prefix}|${num2}|${yy}`;
