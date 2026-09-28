@@ -832,9 +832,11 @@
     if (typeof XLSX === "undefined") { toast("ไม่พบไลบรารี XLSX"); return; }
     const dates = allLoggedDates().filter((d) => d.startsWith(month));
     if (!dates.length) { toast(`ไม่มีข้อมูลบันทึกในเดือน ${month}`); return; }
+    // คอลัมน์ตรงกับ "รายงานการผลิตประจำวันพรมทอมือ" ต้นฉบับของโรงงาน (ชีต SEP) ทุกตำแหน่ง 0-based
+    // เพื่อให้ export แล้วเอากลับมา import ใหม่ได้ และ import ไฟล์รายงานจริงจากโรงงานได้ด้วยตัวอ่านเดียวกัน
     const header1 = ["วันที่", "จอที่", "M/O", "คุณภาพ", "เกรด", "ชิ้นที่", "กว้าง X ยาว", "พื้นที่",
-      "ปกติ:คงเหลือยกมา", "ปกติ:พ.ท.ทำได้", "ปกติ:คงเหลือ", "ปกติ:จำนวนพนักงาน", "ปกติ:เริ่ม", "ปกติ:เลิก", "ปกติ:จำนวนชม.", "ปกติ:ประสิทธิภาพ", "ปกติ:รายชื่อพนักงาน",
-      "โอที:คงเหลือยกมา", "โอที:พ.ท.ทำได้", "โอที:คงเหลือ", "โอที:จำนวนพนักงาน", "โอที:เริ่ม", "โอที:เลิก", "โอที:จำนวนชม.", "โอที:ประสิทธิภาพ", "โอที:รายชื่อพนักงาน",
+      "ปกติ:คงเหลือยกมา", "ปกติ:พ.ท.ทำได้", "ปกติ:คงเหลือ", "ปกติ:จำนวนพนักงาน", "ปกติ:เริ่ม", "ปกติ:เลิก", "ปกติ:ชม.(ต่อกะ)", "ปกติ:รวมชม.(คน-ชม.)", "ปกติ:ประสิทธิภาพ", "ปกติ:รายชื่อพนักงาน",
+      "โอที:คงเหลือยกมา", "โอที:พ.ท.ทำได้", "โอที:คงเหลือ", "โอที:จำนวนพนักงาน", "โอที:เริ่ม", "โอที:เลิก", "โอที:ชม.(ต่อกะ)", "โอที:รวมชม.(คน-ชม.)", "โอที:ประสิทธิภาพ", "โอที:รายชื่อพนักงาน",
       "รวมพื้นที่/วัน", "รวมชั่วโมง/วัน", "ประสิทธิภาพรวม", "ตารางเมตรคงเหลือ"];
     const rows = [header1];
     const refs = allPieceRefs();
@@ -843,11 +845,12 @@
         const day = r.piece.days[iso];
         if (!day) return;
         const carryN = dayCarryNormal(r.piece, iso, r.totalArea), carryOt = dayCarryOt(r.piece, iso, r.totalArea), remain = dayRemaining(r.piece, iso, r.totalArea);
+        const nHrs = shiftHours(day.normal), oHrs = shiftHours(day.ot);
         const nMh = shiftManHours(day.normal), oMh = shiftManHours(day.ot);
         const nSqm = num(day.normal.doneSqm), oSqm = num(day.ot.doneSqm);
         rows.push([iso, r.piece.loomNo || "", r.plan.moNo || r.designId, r.line.quality || "", r.grade, r.line.location || "-", "", r.totalArea,
-          carryN, nSqm || "", carryN - nSqm, (day.normal.workers || []).length || "", day.normal.start, day.normal.end, nMh || "", nMh > 0 ? nSqm / nMh : "", (day.normal.workers || []).join(", "),
-          carryOt, oSqm || "", carryOt - oSqm, (day.ot.workers || []).length || "", day.ot.start, day.ot.end, oMh || "", oMh > 0 ? oSqm / oMh : "", (day.ot.workers || []).join(", "),
+          carryN, nSqm || "", carryN - nSqm, (day.normal.workers || []).length || "", day.normal.start, day.normal.end, nHrs || "", nMh || "", nMh > 0 ? nSqm / nMh : "", (day.normal.workers || []).join(", "),
+          carryOt, oSqm || "", carryOt - oSqm, (day.ot.workers || []).length || "", day.ot.start, day.ot.end, oHrs || "", oMh || "", oMh > 0 ? oSqm / oMh : "", (day.ot.workers || []).join(", "),
           nSqm + oSqm, nMh + oMh, (nMh + oMh) > 0 ? (nSqm + oSqm) / (nMh + oMh) : "", remain]);
       });
     });
@@ -991,16 +994,16 @@
           if (!piece.loomNo && has(row[1])) piece.loomNo = String(row[1]);
           if (!piece.gradeOverride && has(row[4])) piece.gradeOverride = String(row[4]).trim(); // เกรดจริงจากรายงาน (คอลัมน์ E)
           const day = ensureDayRec(piece, iso);
-          // คอลัมน์ตรงกับหัวตารางที่ exportExcel() เขียนไว้ (0-based ตาม header1 ด้านล่าง):
-          // 9=ปกติ:พ.ท.ทำได้ 12=ปกติ:เริ่ม 13=ปกติ:เลิก 16=ปกติ:รายชื่อพนักงาน ; 18=โอที:พ.ท.ทำได้ 21=โอที:เริ่ม 22=โอที:เลิก 25=โอที:รายชื่อพนักงาน
+          // คอลัมน์ตรงกับ "รายงานการผลิตประจำวันพรมทอมือ" ต้นฉบับของโรงงาน (ชีต SEP/ชีตรายวัน) และ exportExcel() ด้านล่าง — ทั้งสองแบบใช้ตำแหน่งเดียวกัน:
+          // 9=ปกติ:พ.ท.ทำได้ 12=ปกติ:เริ่ม 13=ปกติ:เลิก 17=ปกติ:รายชื่อพนักงาน ; 19=โอที:พ.ท.ทำได้ 22=โอที:เริ่ม 23=โอที:เลิก 27=โอที:รายชื่อพนักงาน
           if (has(row[9])) day.normal.doneSqm = num(row[9]);
           if (has(row[12])) day.normal.start = String(row[12]);
           if (has(row[13])) day.normal.end = String(row[13]);
-          if (has(row[16])) day.normal.workers = String(row[16]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
-          if (has(row[18])) day.ot.doneSqm = num(row[18]);
-          if (has(row[21])) day.ot.start = String(row[21]);
-          if (has(row[22])) day.ot.end = String(row[22]);
-          if (has(row[25])) day.ot.workers = String(row[25]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+          if (has(row[17])) day.normal.workers = String(row[17]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+          if (has(row[19])) day.ot.doneSqm = num(row[19]);
+          if (has(row[22])) day.ot.start = String(row[22]);
+          if (has(row[23])) day.ot.end = String(row[23]);
+          if (has(row[27])) day.ot.workers = String(row[27]).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
           saveDesignFloor(designId, dfloor);
           imported++;
         });
