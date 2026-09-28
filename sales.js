@@ -116,7 +116,12 @@
   }
   // สร้าง designId มาตรฐานจากเลขที่เอกสาร (รูปแบบเดียวกับที่ Design/Overview/Planning ฯลฯ ใช้กันทั้งระบบ เช่น เลข "0148/26" -> "MO-0148-26")
   // ใช้ตอนที่เอกสารยังไม่มี designId ติดมา (สร้างใหม่ตรงจากหน้ารายงานขาย หรือ นำเข้า Excel) เพื่อให้เชื่อมกับคิวงานของ Planning/แผนกทอ/ย้อม/ตกแต่งได้ทันที
-  const designIdForDoc = (no, type) => `${type === "SO" ? "SO" : "MO"}-${txt(no).replace(/\//g, "-")}`;
+  // ต้องตัดคำนำหน้า "MO "/"M/O "/"SO "/"S/O " ที่อาจติดมากับเลขที่เอกสารเอง (เช่น "MO TH 168/26") ออกก่อนเสมอ
+  // ไม่งั้นจะได้ designId ซ้อนคำนำหน้าสองชั้นแบบผิด ๆ เช่น "MO-MO TH 168-26" (บั๊กเดียวกับที่เคยแก้ใน normMoKey ของแผนกทอ/ย้อม/KPI)
+  const stripDocPrefix = (s) => txt(s).replace(/^(M\/O|S\/O|MO|SO)[\s.:-]*/i, "");
+  const designIdForDoc = (no, type) => `${type === "SO" ? "SO" : "MO"}-${stripDocPrefix(no).replace(/\//g, "-")}`;
+  // เอกสารเก่าที่เคยบันทึกตอนที่ designId ยังมีบั๊กซ้อนคำนำหน้า (เช่น "MO-MO TH 168-26") — เช็คเพื่อแก้ไขอัตโนมัติตอนบันทึกซ้ำ
+  const isDoublePrefixedDesignId = (id) => /^(MO|SO)-(M\/O|S\/O|MO|SO)[\s.:-]/i.test(txt(id));
 
   /* ---------- เอกสาร ---------- */
   // ข้อมูลจริง นำเข้าจาก Google Sheet "QC Check Sheet" ของบริษัท เมื่อ 22 ก.ย. 2026 (source:"import" เหมือนการนำเข้า Excel ปกติ — นำเข้ารายงาน Excel ซ้ำภายหลังจะแทนที่ชุดนี้ได้ตามกติกาเดิม)
@@ -1055,6 +1060,15 @@
     // M/O,S/O ที่สร้างตรงจากหน้านี้เลย (ไม่ได้เปิดผ่านหน้า Design → "เปิด Job") จะยังไม่มี designId ติดมา —
     // สร้างให้อัตโนมัติจากเลขที่เอกสาร จะได้เชื่อมกับคิวงานของ Planning/แผนกทอ/ย้อม/ตกแต่งได้ทันทีที่บันทึก
     if (!doc.designId && doc.no) doc.designId = designIdForDoc(doc.no, doc.type);
+    // เอกสารที่เคยบันทึกไว้ตอนที่ designId ยังมีบั๊กซ้อนคำนำหน้า (เช่น "MO-MO TH 168-26") — แก้ให้ถูกต้องอัตโนมัติตอนบันทึกซ้ำ
+    // พร้อมย้ายแถวคิวงาน (designs) ที่เคยผูกกับ id เดิมผิด ๆ ไปเป็น id ที่ถูกต้อง ไม่ปล่อยให้กลายเป็นแถวกำพร้าซ้ำซ้อน
+    if (doc.designId && doc.no && isDoublePrefixedDesignId(doc.designId)) {
+      const fixed = designIdForDoc(doc.no, doc.type);
+      if (fixed !== doc.designId) {
+        if (typeof renameDesignId === "function") renameDesignId(doc.designId, fixed);
+        doc.designId = fixed;
+      }
+    }
     if (doc.type === "MO" && window.MoForm) { const mf = window.MoForm.read(f); if (mf) doc.form = mf; }
     if (!doc.no) errs.push("กรอกเลขที่เอกสาร");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(doc.openDate)) errs.push("เลือกวันที่เปิดเอกสาร");
@@ -1119,13 +1133,15 @@
     if (s.next > 0 && target.seq != null && target.yy === curYY() && target.seq >= s.next) { s.next = 0; saveCfg(); }
     // ใช้ designId ของ target (คำนวณ fallback ให้แล้วใน collect() ถ้ายังไม่มี) แทนของ form.draft เดิม
     // เพราะ M/O ที่สร้างตรงจากหน้านี้ (ไม่ได้ผ่านหน้า Design) จะไม่มี designId ติดมาตั้งแต่ต้น
-    const designId = target.designId, isNew = !form.editing;
+    const designId = target.designId;
     ui.market = target.market; ui.reg = target.type;
     if (target.openDate) ui.year = +target.openDate.slice(0, 4);
     closeDialog(); refresh();
     toast(`${mergeInto ? "รวมรายการเข้า" : "บันทึก"} ${target.no} แล้ว`);
     // เชื่อมกับคิวงานของ Planning/แผนกทอ/ย้อม/ตกแต่ง ฯลฯ ทันที — สร้างรายการ Design/Job ใหม่ให้อัตโนมัติถ้ายังไม่มี (ดู app.js: ensureDesignRow)
-    if (designId && isNew && target.type === "MO" && typeof finishOpenJob === "function") finishOpenJob(designId, target.no, { project: target.project, customer: target.customer, market: target.market, importSource: "รายงานขาย (บันทึกใหม่)" });
+    // ทำทุกครั้งที่บันทึก ไม่ว่าจะเป็นการสร้างใหม่หรือแก้ไขเอกสารเดิม (ไม่ใช่แค่ตอนสร้างใหม่ครั้งแรก) เพราะเอกสารเก่าที่แก้ไข/บันทึกซ้ำ
+    // อาจยังไม่เคยเชื่อมกับคิวงานเลยมาก่อน — finishOpenJob เองจะ toast เฉพาะตอนที่มีการเปลี่ยนแปลงจริง (งานใหม่/เปิดงานใหม่) เท่านั้น ไม่ toast ซ้ำถ้าเชื่อมอยู่แล้ว
+    if (designId && target.type === "MO" && typeof finishOpenJob === "function") finishOpenJob(designId, target.no, { project: target.project, customer: target.customer, market: target.market, importSource: "รายงานขาย (บันทึกใหม่)" });
   }
 
   function openShipDialog(id) {

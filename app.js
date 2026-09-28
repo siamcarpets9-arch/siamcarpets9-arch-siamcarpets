@@ -1224,11 +1224,31 @@ function ensureDesignRow(id,moNo,info){
 }
 
 function finishOpenJob(id,moNo,info){
+  // เช็คสถานะก่อนหน้า เพื่อ toast เฉพาะตอนที่มีการเปลี่ยนแปลงจริง (สร้างแถวใหม่ หรือเพิ่งเปิดงาน) — ไม่ toast ซ้ำทุกครั้งที่แก้ไข/บันทึกซ้ำเอกสารที่เชื่อมกับคิวงานอยู่แล้ว
+  const existing=designs.find((item)=>item.id===id);
+  const alreadyOpened=!!existing&&existing.job==="OPENED";
   const row=ensureDesignRow(id,moNo,info);
   if(!row) return;
   saveDesigns();
-  toast(`${id}: ฝ่ายขายเปิด Job${moNo?` (${moNo})`:""} และส่ง Planning แล้ว`);
+  if(!alreadyOpened) toast(`${id}: ฝ่ายขายเปิด Job${moNo?` (${moNo})`:""} และส่ง Planning แล้ว`);
   renderSales();
+}
+
+// แก้ไข designId ที่เคยผิดพลาด (เช่นซ้อนคำนำหน้าประเภทเอกสารสองชั้น) ให้ถูกต้อง — ย้ายแถวคิวงานและ task ที่ผูกกับ id เดิมทั้งหมดไปที่ id ใหม่
+// แทนที่จะปล่อยแถวเดิมที่ผิดค้างเป็นข้อมูลกำพร้าซ้ำซ้อน (เรียกจาก sales.js เมื่อพบ designId บนเอกสารที่บันทึกไว้ผิดรูปแบบ)
+function renameDesignId(oldId,newId){
+  if(!oldId||!newId||oldId===newId) return;
+  const row=designs.find((item)=>item.id===oldId);
+  if(row){
+    if(designs.some((item)=>item.id===newId&&item!==row)){
+      // มีแถวปลายทางที่ถูกต้องอยู่แล้ว (เช่นเคยถูกสร้างไว้แล้วจากการบันทึกอื่น) — ลบแถวเดิมที่ผิดทิ้งแทนการย้ายซ้ำ
+      designs.splice(designs.indexOf(row),1);
+    } else {
+      row.id=newId;
+    }
+  }
+  baseTasks.forEach((task)=>{ if(task.designId===oldId) task.designId=newId; });
+  saveDesigns();
 }
 
 // สำหรับซิงก์ M/O จำนวนมากพร้อมกัน (เช่น นำเข้า Excel รายงานขายทีเดียวหลายสิบ/ร้อยรายการ) — ไม่ toast/render ทีละรายการ
