@@ -1202,19 +1202,38 @@ function openJob(id){
   finishOpenJob(id);
 }
 
-function finishOpenJob(id,moNo){
-  const row=designs.find((item)=>item.id===id);
-  if(!row) return;
+// หา/สร้างรายการ Design=คิวงาน ให้ตรงกับ M/O นี้ — ถ้ายังไม่มี (เช่น M/O ที่สร้าง/นำเข้าตรงจากรายงานขาย
+// โดยไม่เคยผ่านขั้นตอนอนุมัติแบบ/เปิด Job จากหน้า Design มาก่อน) จะสร้างใหม่ให้ทันที ไม่ปล่อยให้เงียบหายไป
+// ไม่ต้องมี flag "ใหม่" พิเศษ เพราะ NewBadge (newbadge.js) ถือว่างานที่เพิ่งสร้างเป็น "ใหม่" ในทุกแผนกเองอยู่แล้ว
+// (แผนกไหนยังไม่เคยเปิดงานนี้ = เห็นป้าย NEW)
+function ensureDesignRow(id,moNo,info){
+  let row=designs.find((item)=>item.id===id);
+  if(!row){
+    if(!info) return null;
+    row={id,project:info.project||"-",customer:info.customer||"",scope:"-",due:"",progress:15,status:"APPROVED",quote:"READY",owner:"",job:"BLOCKED",market:info.market||"",moNo:moNo||"",importSource:info.importSource||"",sample:false};
+    designs.unshift(row);
+  }
   row.job="OPENED";
   if(moNo) row.moNo=moNo;
+  if(info){ if(info.project) row.project=info.project; if(info.customer) row.customer=info.customer; if(info.market) row.market=info.market; }
   if(!baseTasks.some((task)=>task.designId===id)){
     baseTasks.push({designId:id,id:`JOB-${id.slice(4)}`,name:row.project,dept:"Production",start:3.2,end:4.3,color:"production",status:"active"});
     baseTasks.push({designId:id,id:`JOB-${id.slice(4)}`,name:`Planning · ${row.project}`,dept:"Dyeing",start:4.3,end:5.5,color:"dyeing",status:"active"});
   }
+  return row;
+}
+
+function finishOpenJob(id,moNo,info){
+  const row=ensureDesignRow(id,moNo,info);
+  if(!row) return;
   saveDesigns();
   toast(`${id}: ฝ่ายขายเปิด Job${moNo?` (${moNo})`:""} และส่ง Planning แล้ว`);
   renderSales();
 }
+
+// สำหรับซิงก์ M/O จำนวนมากพร้อมกัน (เช่น นำเข้า Excel รายงานขายทีเดียวหลายสิบ/ร้อยรายการ) — ไม่ toast/render ทีละรายการ
+// ผู้เรียกต้อง saveDesigns() และรีเฟรชหน้าจอเองครั้งเดียวหลังลูปนำเข้าจบ (ดู sales.js: doImport)
+function syncDesignRowSilent(id,moNo,info){ return ensureDesignRow(id,moNo,info); }
 
 // คำขอไหมเพิ่มจากแผนกทอ (รอออกใบสั่งย้อม) — เดิมแสดงอยู่ท้ายหน้า Master Plan Gantt (เลิกใช้แล้ว)
 // ย้ายมาแสดงที่ท้ายหน้า "ภาพรวมการผลิต" แทน เรียกจาก overview.js หลัง render ตารางหลักเสร็จทุกครั้ง

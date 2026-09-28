@@ -339,6 +339,7 @@
     return `<div class="pw-job-grid">${ready.map((d) => `<div class="pw-job-card-wrap">
       <button type="button" class="pw-job-card dept-weaving ${state.designId === d.id ? "active" : ""}" data-${pickAttr}="${esc(d.id)}">
         <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
+        ${typeof NewBadge !== "undefined" ? NewBadge.badgeHtml("weavefloor", d.id) : ""}
       </button>${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(d.id, d.id) : ""}
     </div>`).join("")}</div>`;
   }
@@ -1098,7 +1099,7 @@
       const expWv = e.target.closest("[data-export-weavers]");
       if (expWv) { exportWeaveWorkersExcel(); return; }
       const pick = e.target.closest("[data-wfpick]");
-      if (pick) { state.designId = pick.dataset.wfpick; state.lineIdx = null; renderAll(); return; }
+      if (pick) { state.designId = pick.dataset.wfpick; state.lineIdx = null; if (typeof NewBadge !== "undefined") NewBadge.markSeen("weavefloor", state.designId); renderAll(); return; }
       const lpick = e.target.closest("[data-lpick]");
       if (lpick) { state.lineIdx = lpick.dataset.lpick; renderAll(); return; }
       const moSkip = e.target.closest("[data-mo-skip]");

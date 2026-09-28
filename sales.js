@@ -114,6 +114,9 @@
     const m = n.slice(prefix.length).match(/^(\d+)\/(\d{2})$/);
     return m ? { seq: Number(m[1]), yy: Number(m[2]) } : null;
   }
+  // สร้าง designId มาตรฐานจากเลขที่เอกสาร (รูปแบบเดียวกับที่ Design/Overview/Planning ฯลฯ ใช้กันทั้งระบบ เช่น เลข "0148/26" -> "MO-0148-26")
+  // ใช้ตอนที่เอกสารยังไม่มี designId ติดมา (สร้างใหม่ตรงจากหน้ารายงานขาย หรือ นำเข้า Excel) เพื่อให้เชื่อมกับคิวงานของ Planning/แผนกทอ/ย้อม/ตกแต่งได้ทันที
+  const designIdForDoc = (no, type) => `${type === "SO" ? "SO" : "MO"}-${txt(no).replace(/\//g, "-")}`;
 
   /* ---------- เอกสาร ---------- */
   // ข้อมูลจริง นำเข้าจาก Google Sheet "QC Check Sheet" ของบริษัท เมื่อ 22 ก.ย. 2026 (source:"import" เหมือนการนำเข้า Excel ปกติ — นำเข้ารายงาน Excel ซ้ำภายหลังจะแทนที่ชุดนี้ได้ตามกติกาเดิม)
@@ -443,8 +446,9 @@
       const sfx = rd.sfx.match(/(\d{2})/);
       const yy = sfx ? Number(sfx[1]) : yyDefault;
       const seq = /^\d+$/.test(rd.moRaw) ? Number(rd.moRaw) : null;
+      const no = seq != null ? formatNo(key, seq, yy) : `MO ${rd.moRaw}${rd.sfx}`;
       const doc = {
-        id: uid(), market, type: "MO", no: seq != null ? formatNo(key, seq, yy) : `MO ${rd.moRaw}${rd.sfx}`,
+        id: uid(), market, type: "MO", no, designId: designIdForDoc(no, "MO"),
         openDate: openISO[k] || "", customer: rd.block.cust, project: rd.block.po, pi: rd.block.pi, inv: rd.block.inv, incoterms: rd.block.inco,
         currency: MARKETS[market].currency, remarks: rd.remarks.join(" | "), status: "OPEN", actualShip: "", extra: round(rd.extra, 2),
         lines, source: "import"
@@ -813,6 +817,13 @@
     const oldSale = new Map(docs.filter((d) => d.market === market && d.source === "import" && d.sale).map((d) => [normNo(d.no), d.sale]));
     fresh.forEach((d) => { const v = oldSale.get(normNo(d.no)); if (v) d.sale = v; }); // คง Sale ที่กำหนดรายใบไว้เมื่อนำเข้าซ้ำ
     docs = keep.concat(fresh);
+    // เชื่อมทุก M/O ที่นำเข้าเข้ากับคิวงานของ Planning/แผนกทอ/ย้อม/ตกแต่ง ฯลฯ ทันที (สร้างรายการ Design/Job ใหม่ให้อัตโนมัติถ้ายังไม่มี)
+    // — ของเดิมที่เชื่อมอยู่แล้วจะแค่รีเฟรช job/moNo/project/customer ให้ตรงเท่านั้น ไม่ทำให้ป้าย "ใหม่" ของแผนกที่เคยเห็นแล้วโผล่ซ้ำ
+    // ใช้ตัวเงียบ (ไม่ toast/render ทีละรายการ) เพราะนำเข้าทีเดียวได้เป็นสิบ/ร้อยรายการ — ค่อย saveDesigns() รวดเดียวหลังลูป
+    if (typeof syncDesignRowSilent === "function") {
+      fresh.forEach((d) => { if (d.designId) syncDesignRowSilent(d.designId, d.no, { project: d.project, customer: d.customer, market: d.market, importSource: `นำเข้า Excel รายงานขาย (${sheet})` }); });
+      if (typeof saveDesigns === "function") saveDesigns();
+    }
     const yc = {}; fresh.forEach((d) => { if (d.openDate) yc[d.openDate.slice(0, 4)] = (yc[d.openDate.slice(0, 4)] || 0) + 1; });
     const topYear = Object.entries(yc).sort((a, b) => b[1] - a[1])[0];
     ui.market = market; ui.reg = "MO"; ui.month = 0; ui.day = 0; if (topYear) ui.year = +topYear[0];
@@ -901,7 +912,7 @@
       </div>
       ${isMO && window.MoForm ? window.MoForm.editorHtml(d) : ""}
       <div id="srFormMsg"></div>
-      <div class="sr-form-actions"><button type="button" class="action-button ghost" data-sr="close-dlg">ยกเลิก</button><button type="submit" class="action-button primary">${form.editing ? "บันทึกการแก้ไข" : d.designId && isMO ? "บันทึกและเปิด Job ส่ง Planning" : "บันทึก"}</button></div>
+      <div class="sr-form-actions"><button type="button" class="action-button ghost" data-sr="close-dlg">ยกเลิก</button><button type="submit" class="action-button primary">${form.editing ? "บันทึกการแก้ไข" : isMO ? "บันทึกและเปิด Job ส่ง Planning" : "บันทึก"}</button></div>
     </form>`;
   }
   // รูปดีไซน์ของ M/O,S/O นี้ — อัปโหลดที่นี่ครั้งเดียว แล้วไปโชว์ต่อในหน้าภาพรวม/ใบส่งของ/การ์ดเลือกงานทุกแผนกอัตโนมัติ
@@ -1041,6 +1052,9 @@
     const packaging = readPackaging().filter((r) => r.materialName || r.qty != null).map((r) => ({ ...r, qty: r.qty != null ? round(num(r.qty), 3) : null }));
     const doc = { ...d, market: v("market") || d.market, no: v("no"), openDate: v("openDate"), customer: v("customer"), project: v("project"), pi: v("pi"), inv: v("inv"), incoterms: v("incoterms"), currency: v("currency") || d.currency, remarks: v("remarks"), sale: v("sale") && v("sale") !== derivedSale(v("customer"), d.designId) ? v("sale") : "", extra: f.elements.extra ? round(num(f.elements.extra.value), 2) : 0, lines, packaging };
     delete doc.seq; delete doc.yy;
+    // M/O,S/O ที่สร้างตรงจากหน้านี้เลย (ไม่ได้เปิดผ่านหน้า Design → "เปิด Job") จะยังไม่มี designId ติดมา —
+    // สร้างให้อัตโนมัติจากเลขที่เอกสาร จะได้เชื่อมกับคิวงานของ Planning/แผนกทอ/ย้อม/ตกแต่งได้ทันทีที่บันทึก
+    if (!doc.designId && doc.no) doc.designId = designIdForDoc(doc.no, doc.type);
     if (doc.type === "MO" && window.MoForm) { const mf = window.MoForm.read(f); if (mf) doc.form = mf; }
     if (!doc.no) errs.push("กรอกเลขที่เอกสาร");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(doc.openDate)) errs.push("เลือกวันที่เปิดเอกสาร");
@@ -1103,12 +1117,15 @@
     stamp(target);
     const s = cfg.series[docSeries(target)];
     if (s.next > 0 && target.seq != null && target.yy === curYY() && target.seq >= s.next) { s.next = 0; saveCfg(); }
-    const designId = form.draft.designId, isNew = !form.editing;
+    // ใช้ designId ของ target (คำนวณ fallback ให้แล้วใน collect() ถ้ายังไม่มี) แทนของ form.draft เดิม
+    // เพราะ M/O ที่สร้างตรงจากหน้านี้ (ไม่ได้ผ่านหน้า Design) จะไม่มี designId ติดมาตั้งแต่ต้น
+    const designId = target.designId, isNew = !form.editing;
     ui.market = target.market; ui.reg = target.type;
     if (target.openDate) ui.year = +target.openDate.slice(0, 4);
     closeDialog(); refresh();
     toast(`${mergeInto ? "รวมรายการเข้า" : "บันทึก"} ${target.no} แล้ว`);
-    if (designId && isNew && target.type === "MO" && typeof finishOpenJob === "function") finishOpenJob(designId, target.no);
+    // เชื่อมกับคิวงานของ Planning/แผนกทอ/ย้อม/ตกแต่ง ฯลฯ ทันที — สร้างรายการ Design/Job ใหม่ให้อัตโนมัติถ้ายังไม่มี (ดู app.js: ensureDesignRow)
+    if (designId && isNew && target.type === "MO" && typeof finishOpenJob === "function") finishOpenJob(designId, target.no, { project: target.project, customer: target.customer, market: target.market, importSource: "รายงานขาย (บันทึกใหม่)" });
   }
 
   function openShipDialog(id) {

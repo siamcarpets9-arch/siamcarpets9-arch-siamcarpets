@@ -545,6 +545,7 @@
       return `<div class="pw-job-card-wrap">
         <button type="button" class="pw-job-card dept-planning ${state.designId === d.id ? "active" : ""}" data-pick="${esc(d.id)}">
           <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(d.moNo || "ยังไม่มีเลข M/O")}</small>
+          ${typeof NewBadge !== "undefined" ? NewBadge.badgeHtml("planning", d.id) : ""}
           ${tag(has_plan ? "วางแผนแล้ว" : "รอวางแผน", has_plan ? "" : "review")}
         </button>${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(d.id, d.id) : ""}
       </div>`;
@@ -1039,6 +1040,7 @@
     state.plan = ensurePlan(id);
     state.photoAnalysis = null;
     state.photoAnalyzing = false;
+    if (typeof NewBadge !== "undefined") NewBadge.markSeen("planning", id);
     renderAll();
   }
 

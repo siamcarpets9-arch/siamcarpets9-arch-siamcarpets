@@ -214,9 +214,10 @@
 
   function orderCardHtml(g) {
     const label = g.info ? (g.info.project || g.designId) : "";
-    return `<button type="button" class="pw-job-card dept-dyeing ${state.selectedKey === g.key ? "active" : ""}" data-dpick="${esc(g.key)}">
+    return `<button type="button" class="pw-job-card dept-dyeing ${state.selectedKey === g.key ? "active" : ""}" data-dpick="${esc(g.key)}" data-design-id="${esc(g.designId || "")}">
       <strong>${esc(g.orderNo)}</strong><span>${esc(label || (g.orderType === "MO" ? "M/O" : g.orderType === "SO" ? "S/O" : ""))}</span>
       <small>${g.rows.length} แถว · ${fmt(g.totalActualKg, 2)} กก. · ${new Date(g.lastDate).toLocaleDateString("th-TH")}</small>
+      ${typeof NewBadge !== "undefined" ? NewBadge.badgeHtml("dyeing", g.designId) : ""}
       ${g.plan ? tag("เชื่อมแผนแล้ว", "") : tag("ไม่พบใบวางแผนงาน", "review")}
       ${g.usedSurplus ? tag("ใช้ Surplus", "blocked") : ""}
     </button>`;
@@ -416,7 +417,7 @@
         return;
       }
       const pick = e.target.closest("[data-dpick]");
-      if (pick) { state.selectedKey = pick.dataset.dpick; renderAll(); return; }
+      if (pick) { state.selectedKey = pick.dataset.dpick; if (typeof NewBadge !== "undefined" && pick.dataset.designId) NewBadge.markSeen("dyeing", pick.dataset.designId); renderAll(); return; }
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
     });
     root.addEventListener("input", (e) => {

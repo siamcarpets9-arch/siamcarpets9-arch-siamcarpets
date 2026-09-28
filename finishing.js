@@ -204,6 +204,7 @@
     return `<div class="pw-job-grid">${refs.map((r) => `<div class="pw-job-card-wrap">
       <button type="button" class="pw-job-card dept-finishing ${state.designId === r.designId && state.lineIdx == r.lineIdx ? "active" : ""}" data-fnpick-design="${esc(r.designId)}" data-fnpick-line="${esc(r.lineIdx)}">
         <strong>${esc(r.plan.moNo || r.designId)}</strong><span>${esc(r.line.location || `ชิ้นที่ ${Number(r.lineIdx) + 1}`)}</span><small>จอ ${esc(r.weavePiece.loomNo || "-")} · โอนแล้ว ${new Date(r.weavePiece.transferredToGlueAt).toLocaleDateString("th-TH")}</small>
+        ${typeof NewBadge !== "undefined" ? NewBadge.badgeHtml("finishing", r.designId) : ""}
       </button>${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(r.designId, r.plan.moNo || r.designId) : ""}
     </div>`).join("")}</div>`;
   }
@@ -519,7 +520,7 @@
       const expFw = e.target.closest("[data-export-finworkers]");
       if (expFw) { exportFinWorkersExcel(); return; }
       const pick = e.target.closest("[data-fnpick-design]");
-      if (pick) { state.designId = pick.dataset.fnpickDesign; state.lineIdx = pick.dataset.fnpickLine; renderAll(); return; }
+      if (pick) { state.designId = pick.dataset.fnpickDesign; state.lineIdx = pick.dataset.fnpickLine; if (typeof NewBadge !== "undefined") NewBadge.markSeen("finishing", state.designId); renderAll(); return; }
       const moSkip = e.target.closest("[data-mo-skip]");
       if (moSkip) {
         if (typeof OverviewEngine === "undefined" || !OverviewEngine.setSkipped) return;

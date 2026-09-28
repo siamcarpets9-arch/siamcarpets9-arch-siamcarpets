@@ -168,6 +168,7 @@
     return `<div class="pw-job-grid">${ready.map((d) => `<div class="pw-job-card-wrap">
       <button type="button" class="pw-job-card dept-pattern ${state.designId === d.id ? "active" : ""}" data-ppick="${esc(d.id)}">
         <strong>${esc(d.id)}</strong><span>${esc(d.project)}</span><small>${esc(plans[d.id].moNo || "ยังไม่มีเลข M/O")}</small>
+        ${typeof NewBadge !== "undefined" ? NewBadge.badgeHtml("pattern", d.id) : ""}
       </button>${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(d.id, d.id) : ""}
     </div>`).join("")}</div>`;
   }
@@ -336,7 +337,7 @@
     const root = $("#patternView");
     root.addEventListener("click", (e) => {
       const pick = e.target.closest("[data-ppick]");
-      if (pick) { state.designId = pick.dataset.ppick; renderAll(); return; }
+      if (pick) { state.designId = pick.dataset.ppick; if (typeof NewBadge !== "undefined") NewBadge.markSeen("pattern", state.designId); renderAll(); return; }
       const issue = e.target.closest("[data-issue-req]");
       if (issue && !issue.disabled) {
         const rec = loadOrders()[state.designId] || ensureOrder(state.designId);
