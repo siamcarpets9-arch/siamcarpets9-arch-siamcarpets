@@ -75,9 +75,9 @@
   function loadCombined() { const l = readJson(KEY_COMBINED, []); return Array.isArray(l) ? l : []; }
   function saveCombined(list) { writeJson(KEY_COMBINED, list); }
 
-  function blankCombinedOrder(colorCode, method, methodOther) {
+  function blankCombinedOrder(colorCode, method, methodOther, matching) {
     return {
-      id: uid("dc"), colorCode: colorCode || "", method: method || "CtoC", methodOther: methodOther || "",
+      id: uid("dc"), colorCode: colorCode || "", method: method || "CtoC", methodOther: methodOther || "", matching: matching || "",
       items: [], // [{designId, potKey}]
       source: "inhouse", vendor: "", lot: "",
       rewind: false, twist: false, ply: false,
@@ -99,8 +99,10 @@
   function methodKeyOf(method, methodOther) {
     return method === "other" ? `other:${String(methodOther || "").trim().toUpperCase()}` : (method || "CtoC");
   }
-  function groupKeyOf(colorCode, method, methodOther) {
-    return `${colorCode || "(ไม่ระบุสี)"}|${methodKeyOf(method, methodOther)}`;
+  // Matching (เทียบสี S TO S/C TO C/C TO S/S TO C) ต้องเป็นเงื่อนไขแยกกลุ่มด้วยเสมอ — สีรหัสเดียวกัน+วิธีย้อมเดียวกัน
+  // แต่ Matching ต่างกัน (เช่น มาจากโซน Loop กับโซน Cut ของคนละ M/O หรือลูกค้ากำหนดเทียบสีต่างแบบ) ต้อง "แยกเบอร์ย้อม" เสมอ ห้ามรวมเป็นใบสั่งย้อมเดียวกัน
+  function groupKeyOf(colorCode, method, methodOther, matching) {
+    return `${colorCode || "(ไม่ระบุสี)"}|${methodKeyOf(method, methodOther)}|${matching || "AUTO"}`;
   }
 
   // ปรับทุกใบสั่งย้อมรวมที่บันทึกไว้ ให้เอารายการที่ไม่มีอยู่จริงแล้ว (ลบ M/O ทิ้ง/ลบโซนออกจนไม่มีหม้อนี้แล้ว) ออกอัตโนมัติ
@@ -117,7 +119,15 @@
         return dye.pots.some((p) => p.key === it.potKey);
       });
       if (validItems.length !== c.items.length) changed = true;
-      return { ...c, items: validItems };
+      let out = { ...c, items: validItems };
+      // ใบสั่งย้อมรวมเก่าที่บันทึกไว้ก่อนมีฟีเจอร์ Matching — เติมค่าให้อัตโนมัติจากหม้อย้อมแรกในใบ (เดาจากลักษณะขน) ครั้งเดียว ไม่งั้นจะว่างเปล่า
+      if (!out.matching && validItems.length) {
+        const plan = plans[validItems[0].designId];
+        const dye = plan ? PE().computeDyePlan(plan.zones, num(plan.totalAreaSqm), plan.bufferPct) : null;
+        const pot = dye ? dye.pots.find((p) => p.key === validItems[0].potKey) : null;
+        if (pot) { out = { ...out, matching: PE().autoMatchingOfPot(pot) }; changed = true; }
+      }
+      return out;
     }).filter((c) => c.items.length > 0);
     if (kept.length !== list.length) changed = true;
     if (changed) saveCombined(kept);
@@ -146,6 +156,8 @@
           customer: info.customer || "-", project: info.project || "-",
           pot, order, colorCode: colorCodeOfPot(pot),
           method: order ? order.method : "CtoC", methodOther: order ? order.methodOther : "",
+          // Matching ที่ใช้จริง — ค่าที่ผู้ใช้เลือกเองในใบสั่งย้อมของ M/O นี้ (order.matching) ถ้ามี ไม่งั้นเดาอัตโนมัติจากลักษณะขนของหม้อ (ดู PlanningEngine.effectiveMatching)
+          matching: PE().effectiveMatching ? PE().effectiveMatching(order, pot) : "",
           netKg: pot.netKg
         });
       });
@@ -156,8 +168,8 @@
   function groupPending(list) {
     const map = new Map();
     list.forEach((it) => {
-      const key = groupKeyOf(it.colorCode, it.method, it.methodOther);
-      if (!map.has(key)) map.set(key, { key, colorCode: it.colorCode, method: it.method, methodOther: it.methodOther, items: [] });
+      const key = groupKeyOf(it.colorCode, it.method, it.methodOther, it.matching);
+      if (!map.has(key)) map.set(key, { key, colorCode: it.colorCode, method: it.method, methodOther: it.methodOther, matching: it.matching, items: [] });
       map.get(key).items.push(it);
     });
     return [...map.values()].sort((a, b) => b.items.length - a.items.length || a.colorCode.localeCompare(b.colorCode));
@@ -193,7 +205,7 @@
     const set = state.selected.get(groupKey);
     if (!set || set.size < 2) { toast("เลือกอย่างน้อย 2 รายการที่จะรวมเป็นใบสั่งย้อมเดียวกัน"); return; }
     const chosen = group.items.filter((it) => set.has(`${it.designId}::${it.potKey}`));
-    const c = blankCombinedOrder(group.colorCode, group.method, group.methodOther);
+    const c = blankCombinedOrder(group.colorCode, group.method, group.methodOther, group.matching);
     c.items = chosen.map((it) => ({ designId: it.designId, potKey: it.potKey }));
     const netKg = chosen.reduce((t, it) => t + it.netKg, 0);
     const cap = PE().dyeInhouseCapKg ? PE().dyeInhouseCapKg() : 20;
@@ -255,15 +267,16 @@
   function groupHtml(group) {
     const open = state.openGroups.has(group.key);
     const methodLabel = group.method === "other" ? (group.methodOther || "อื่น ๆ") : (((PE().DYE_METHODS || []).find((m) => m.value === group.method) || {}).label || group.method);
+    const matchLabel = PE().matchingLabel ? PE().matchingLabel(group.matching) : (group.matching || "");
     const totalKg = group.items.reduce((t, it) => t + it.netKg, 0);
     const selCount = state.selected.has(group.key) ? state.selected.get(group.key).size : 0;
     return `<details class="pw-dye-cost-detail dc-group" data-dc-group="${esc(group.key)}" ${open ? "open" : ""}>
-      <summary><strong>สี ${esc(group.colorCode || "(ไม่ระบุ)")}</strong> · ${esc(methodLabel)} — ${group.items.length} หม้อ (${group.items.map((it) => esc(it.moNo)).join(", ")}) รวม ${fmt(totalKg, 3)} กก.</summary>
+      <summary><strong>สี ${esc(group.colorCode || "(ไม่ระบุ)")}</strong> · ${esc(methodLabel)} · เทียบสี ${esc(matchLabel)} — ${group.items.length} หม้อ (${group.items.map((it) => esc(it.moNo)).join(", ")}) รวม ${fmt(totalKg, 3)} กก.</summary>
       <div class="pw-body">
         <table class="calc-table"><thead><tr><th></th><th>M/O</th><th>ลูกค้า/Project</th><th>หม้อย้อม</th><th class="num">น้ำหนักไหม</th></tr></thead>
         <tbody>${group.items.map((it) => pendingRowHtml(it, group.key)).join("")}</tbody></table>
         <div class="pw-row" style="margin-top:8px;align-items:center">
-          ${selCount ? `<span class="tag-total">เลือกแล้ว ${selCount} รายการ</span>` : `<small class="muted">ติ๊กเลือกอย่างน้อย 2 รายการที่ต้องการย้อมรวมกัน (รหัสสี+วิธีย้อมเดียวกัน)</small>`}
+          ${selCount ? `<span class="tag-total">เลือกแล้ว ${selCount} รายการ</span>` : `<small class="muted">ติ๊กเลือกอย่างน้อย 2 รายการที่ต้องการย้อมรวมกัน (รหัสสี+วิธีย้อม+การเทียบสีเดียวกัน — สีเดียวกันแต่เทียบสีคนละแบบจะไม่ถูกจัดกลุ่มรวมกัน ต้องแยกเบอร์ย้อมเสมอ)</small>`}
           <button type="button" class="action-button primary" data-dc-combine="${esc(group.key)}" ${selCount < 2 ? "disabled" : ""}>รวมเป็นใบสั่งย้อมเดียว (${selCount || 0})</button>
         </div>
       </div>
@@ -278,10 +291,11 @@
     const overCap = !isOut && netKg > cap;
     const cost = PE().dyeOrderCost(c, netKg);
     const methodLabel = c.method === "other" ? (c.methodOther || "อื่น ๆ") : (((PE().DYE_METHODS || []).find((m) => m.value === c.method) || {}).label || c.method);
+    const matchLabel = PE().matchingLabel ? PE().matchingLabel(c.matching) : (c.matching || "");
     const firstZone = (items[0] && items[0].pot.zones[0]) || {};
     return `<div class="pw-dye-card dc-card" data-dc-card="${esc(c.id)}">
       <div class="pw-dye-head">
-        <strong>สี ${esc(c.colorCode || "(ไม่ระบุ)")} · ${esc(methodLabel)}</strong>
+        <strong>สี ${esc(c.colorCode || "(ไม่ระบุ)")} · ${esc(methodLabel)} · เทียบสี ${esc(matchLabel)}</strong>
         <span>${items.length} M/O รวม · ${fmt(netKg, 3)} กก.</span>
       </div>
       <table class="calc-table" style="margin-bottom:8px"><thead><tr><th>M/O</th><th>ลูกค้า/Project</th><th>หม้อย้อม</th><th class="num">น้ำหนักไหม</th><th></th></tr></thead>
@@ -299,6 +313,7 @@
         ${field("Yarn Lot", inp("lot", c.lot, 'inputmode="text"'))}
         <label class="pf">วิธีย้อม<select name="method">${(PE().DYE_METHODS || []).map((m) => `<option value="${m.value}" ${c.method === m.value ? "selected" : ""}>${m.label}</option>`).join("")}</select></label>
         ${c.method === "other" ? field("ระบุวิธีย้อม", inp("methodOther", c.methodOther, 'inputmode="text"')) : ""}
+        <label class="pf" title="ล็อกไว้ตอนรวมเป็นใบสั่งย้อมเดียวกัน (สีเดียวกันแต่เทียบสีคนละแบบจะไม่ถูกจัดกลุ่มรวมกันตั้งแต่แรก)">เทียบสี/Matching<select name="matching">${(PE().MATCHING_OPTS || []).filter((m) => m.value !== "").map((m) => `<option value="${m.value}" ${c.matching === m.value ? "selected" : ""}>${m.label}</option>`).join("")}</select></label>
       </div>
       <div class="pw-dye-flags">
         <label><input type="checkbox" name="rewind" ${c.rewind ? "checked" : ""}> ต้องกรอไหม</label>
@@ -338,12 +353,14 @@
     const isOut = c.source === "outsource";
     const cost = PE().dyeOrderCost(c, netKg);
     const methodLabel = c.method === "other" ? (c.methodOther || "อื่น ๆ") : (((PE().DYE_METHODS || []).find((m) => m.value === c.method) || {}).label || c.method);
+    const matchLabel = PE().matchingLabel ? PE().matchingLabel(c.matching) : (c.matching || "");
     return `<div class="pw-print-sheet">
       <div class="pw-print-title">ใบสั่งย้อมรวม (Combined Dye Order)</div>
       <div class="pw-print-meta">
         <div><b>รหัสสี:</b> ${esc(c.colorCode || "-")}</div>
         <div><b>วันที่พิมพ์:</b> ${new Date().toLocaleDateString("th-TH")}</div>
         <div><b>วิธีย้อม:</b> ${esc(methodLabel)}</div>
+        <div><b>เทียบสี/Matching:</b> ${esc(matchLabel)}</div>
         <div><b>น้ำหนักไหมรวม:</b> ${fmt(netKg, 3)} กก.</div>
         <div><b>แหล่งย้อม:</b> ${isOut ? "จ้างย้อมบริษัทอื่น" : "ย้อมภายในบริษัท"}${isOut && c.vendor ? " — " + esc(c.vendor) : ""}</div>
         <div><b>Yarn Lot:</b> ${esc(c.lot || "-")}</div>

@@ -325,6 +325,26 @@
     { value: "package", label: "Package" },
     { value: "other", label: "อื่น ๆ" }
   ];
+  // เทียบสี (Matching) ตอนสั่งย้อม — คนละเรื่องกับ "วิธีย้อม" ด้านบน (นี่คือวิธีตรวจ/เทียบสีที่ย้อมได้กับสีอ้างอิง)
+  // ค่าเริ่มต้นจากลักษณะขนของหม้อย้อม: โซน Loop/Tip Shear (ขนห่วง) เทียบแบบไจกับไจ = S TO S, โซน Cut to Side/Cut to Cut (ขนตัด) เทียบแบบหลอดกับหลอด = C TO C
+  // แต่ถ้าลูกค้ากำหนดให้เทียบกับตัวอย่างอ้างอิงที่ทำมาคนละแบบ (เช่น มาสเตอร์ตัดตัวอย่างเป็นไจ) ให้เลือกเองเป็น C TO S หรือ S TO C ต่อหม้อย้อมได้
+  // กฎสำคัญ: สีรหัสเดียวกันแต่ Matching ต่างกัน "ต้องแยกเบอร์ย้อม/ใบสั่งย้อมเสมอ" ห้ามรวมเป็นใบสั่งย้อมเดียวกันแม้จะรวมกันได้ตามรหัสสี+วิธีย้อม (ดู dye-combined.js: groupKeyOf)
+  const MATCHING_OPTS = [
+    { value: "", label: "(อัตโนมัติจากลักษณะขน)" },
+    { value: "CTOC", label: "C TO C" },
+    { value: "STOC", label: "S TO C" },
+    { value: "CTOS", label: "C TO S" },
+    { value: "STOS", label: "S TO S" }
+  ];
+  const matchingLabel = (v) => (MATCHING_OPTS.find((m) => m.value === v) || {}).label || v || "";
+  // เดา Matching อัตโนมัติจากลักษณะขนของโซนในหม้อย้อมนี้ — หม้อย้อมหนึ่งใบมาจากโซนกลุ่มเดียวกันเสมอ (ดู potKeyOf: Loop/Tip Shear แยกบัคเก็ตจาก Cut อยู่แล้ว) จึงดูจากโซนแรกพอ
+  function autoMatchingOfPot(pot) {
+    const z = (pot && pot.zones && pot.zones[0]) || {};
+    const soft = z.weaveType === "loop" || z.weaveType === "tipshear";
+    return soft ? "STOS" : "CTOC";
+  }
+  // Matching ที่ใช้จริงของหม้อย้อม/ใบสั่งย้อมนี้ — ใช้ค่าที่ผู้ใช้เลือกเอง (order.matching) ถ้ามี ไม่งั้นเดาอัตโนมัติจากลักษณะขน
+  function effectiveMatching(order, pot) { return (order && order.matching) || autoMatchingOfPot(pot); }
   // เกณฑ์ย้อมในบริษัท — ถ้าน้ำหนักไหมสุทธิของหม้อย้อมเกินนี้ ให้แนะนำส่งจ้างย้อมภายนอกแทน (ค่าเริ่มต้น 20 กก. แก้ไขเพิ่มเติมได้)
   const KEY_DYE_CAP = "siam-dye-inhouse-cap-kg";
   function loadDyeCapKg() { const v = readJson(KEY_DYE_CAP, null); return typeof v === "number" && v > 0 ? v : 20; }
@@ -333,7 +353,7 @@
   function isoToDate(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "")); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; }
   function blankDyeOrder(dyeSeg) {
     return {
-      source: "inhouse", vendor: "", lot: "", method: "CtoC", methodOther: "",
+      source: "inhouse", vendor: "", lot: "", method: "CtoC", methodOther: "", matching: "",
       rewind: false, twist: false, ply: false,
       buyYarn: false, yarnPricePerKg: 0, serviceFeePerKg: 0,
       special: false, surchargePct: 0,
@@ -362,6 +382,7 @@
     potKeyOf, potLabelOf, computeZone, computeDyePlan, zoneMixComponents, blankMixRow,
     deptDays, dateToOffset, offsetToDate, fmtThaiDate, computeSchedule, laborCost,
     DYE_METHODS, isoDate, isoToDate, blankDyeOrder, dyeOrderCost,
+    MATCHING_OPTS, matchingLabel, autoMatchingOfPot, effectiveMatching,
     KEY_DYE_CAP, dyeInhouseCapKg: loadDyeCapKg, setDyeInhouseCapKg: saveDyeCapKg,
     blankWeaveOutsource, weaveOutsourceCost,
     KEY_PRESETS, KEY_WORKERS, KEY_PLANS, readJson, writeJson,
@@ -691,6 +712,7 @@
         ${field("Yarn Lot", inp("lot", order.lot, 'inputmode="text"'))}
         <label class="pf">วิธีย้อม<select name="method">${DYE_METHODS.map((m) => `<option value="${m.value}" ${order.method === m.value ? "selected" : ""}>${m.label}</option>`).join("")}</select></label>
         ${order.method === "other" ? field("ระบุวิธีย้อม", inp("methodOther", order.methodOther, 'inputmode="text"')) : ""}
+        <label class="pf" title="ค่าเริ่มต้น: ${esc(matchingLabel(autoMatchingOfPot(pot)))} (เดาจากลักษณะขนของหม้อนี้) — เลือกเองถ้าลูกค้ากำหนดให้เทียบกับตัวอย่างคนละแบบ">เทียบสี/Matching<select name="matching">${MATCHING_OPTS.map((m) => `<option value="${m.value}" ${order.matching === m.value ? "selected" : ""}>${m.value === "" ? `(อัตโนมัติ: ${matchingLabel(autoMatchingOfPot(pot))})` : m.label}</option>`).join("")}</select></label>
       </div>
       <div class="pw-dye-flags">
         <label><input type="checkbox" name="rewind" ${order.rewind ? "checked" : ""}> ต้องกรอไหม</label>
@@ -745,6 +767,7 @@
         <div><b>ลูกค้า:</b> ${esc(info.customer || "-")}</div>
         <div><b>โปรเจกต์:</b> ${esc(info.project || "-")}</div>
         <div><b>หม้อย้อม/โซนสี:</b> ${esc(pot.label)}</div>
+        <div><b>เทียบสี/Matching:</b> ${esc(matchingLabel(effectiveMatching(order, pot)))}</div>
         <div><b>Yarn Code:</b> ${esc(firstZone.yarnCode || "-")} · Tex ${esc(firstZone.Tex || "-")}</div>
         <div><b>น้ำหนักไหมสุทธิ:</b> ${fmt(pot.netKg, 3)} กก.</div>
         <div><b>แหล่งย้อม:</b> ${isOut ? "จ้างย้อมบริษัทอื่น" : "ย้อมภายในบริษัท"}${isOut && order.vendor ? " — " + esc(order.vendor) : ""}</div>
