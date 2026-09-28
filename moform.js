@@ -62,6 +62,22 @@
   }
   const autoQuality = (doc) => uniq((doc.lines || []).map((l) => txt(l.quality))).join(" ; ");
   function colorRows(doc) { return ((doc.form && doc.form.colors) || []).filter((c) => txt(c.code) || txt(c.name) || num(c.kg) || txt(c.hex)); }
+  // ช่อง "M/O" บนฟอร์มมีป้าย "M/O" พิมพ์ไว้แล้ว — ถ้าเลขที่ในระบบขายเก็บคำนำหน้า "MO"/"M/O" ติดมาด้วย (เช่น "MO TH 168/26")
+  // ให้ตัดออกก่อนพิมพ์ ไม่งั้นจะขึ้นซ้ำเป็น "M/O   MO TH 168/26"
+  const displayNo = (raw) => txt(raw).replace(/^(M\/O|MO)[\s.:-]+/i, "");
+  // จัดกลุ่มรายการตาม "ขนาด" (ใช้ช่อง size ก่อน ถ้าไม่มีค่อยใช้ location ที่บางหน้างาน เช่น พรมทอมือสั่งตัด ใช้เก็บขนาดต่อชิ้นไว้แทน)
+  // — ไม่รวม Design เข้ามาในกลุ่ม ตามที่ต้องการ: ให้เห็นแค่ขนาด + จำนวนชิ้น + ผลรวมตร.ม. ของแต่ละขนาด
+  function sizeGroups(lines) {
+    const map = new Map(), order = [];
+    (lines || []).forEach((l) => {
+      const sz = txt(l.size) || txt(l.location) || "-";
+      if (!map.has(sz)) { map.set(sz, { size: sz, pcs: 0, sqm: 0 }); order.push(sz); }
+      const g = map.get(sz);
+      g.pcs += num(l.pcs) || 1; // ถ้ายังไม่กรอกจำนวนชิ้นต่อรายการ ให้นับรายการนั้นเป็นอย่างน้อย 1 ชิ้น
+      g.sqm += lineSqm(l);
+    });
+    return order.map((sz) => map.get(sz));
+  }
 
   /* ---------- อ้างถึง / Ref. (POM · S/O · M/O · อื่นๆ) — รองรับหลายรายการ ---------- */
   const REF_TYPES = [["SO", "S/O", "S/O "], ["MO", "M/O", "M/O "], ["POM", "POM", "POM "], ["OTHER", "อื่นๆ", ""]];
@@ -102,12 +118,14 @@
     const designs = uniq(lines.map((l) => txt(l.design))), sizes = uniq(lines.map((l) => txt(l.size)));
     const refRows = refRowsForDoc(doc);
     const refsText = refRows.filter((r) => txt(r.no)).map(refLabel).join(" , ");
-    const detail = lines.map((l, i) => `${i + 1}) ${txt(l.design) || "-"}${txt(l.location) ? " · " + txt(l.location) : ""}`);
+    const groups = sizeGroups(lines);
+    // รายละเอียด/Details: แสดงตาม "ขนาด" ไม่เอา Design — จำนวนชิ้น + ผลรวมตร.ม. ของแต่ละขนาด
+    const detail = groups.map((g, i) => `${i + 1}) ${g.size} · ${g.pcs} ชิ้น · ${fmt(g.sqm)} ตร.ม.`);
     const areaAuto = lines.map((l) => { const u = l.unit === "F2" ? "ft²" : "m²", q = l.qty != null && l.qty !== "" ? fmt(num(l.qty)) : ""; return `${txt(l.size) || txt(l.design) || "-"}${q ? ` = ${q} ${u}` : ""}${l.unit === "F2" ? ` → ${fmt(lineSqm(l))} ตร.ม.` : ""}`; });
     return {
-      no: doc ? txt(doc.no) : "", refsText, customer: txt(doc && doc.customer), productCode: txt(f.productCode), project: txt(doc && doc.project),
-      sqm, pcs: lines.reduce((t, l) => t + num(l.pcs), 0), detail, areaAuto, quality: txt(f.quality) || autoQuality(doc || {}), designs: txt(f.designNo) || compactDesigns(designs),
-      delivery: txt(f.delivery) || autoDelivery(doc || {}), nColors: cols.length, cols, spec: sp, kgHire, kgOwn, kgAll, sizes,
+      no: doc ? displayNo(doc.no) : "", refsText, customer: txt(doc && doc.customer), productCode: txt(f.productCode), project: txt(doc && doc.project),
+      sqm, pcs: lines.reduce((t, l) => t + (num(l.pcs) || 1), 0), detail, areaAuto, quality: txt(f.quality) || autoQuality(doc || {}), designs: txt(f.designNo) || compactDesigns(designs),
+      delivery: txt(f.delivery) || autoDelivery(doc || {}), nColors: cols.length, nColorsText: txt(f.nColorsNote) || (cols.length ? String(cols.length) : ""), cols, spec: sp, kgHire, kgOwn, kgAll, sizes,
       wPerSqm: sqm > 0 && kgAll > 0 ? kgAll / sqm : 0, specSqm: f.specSqm === "" || f.specSqm == null ? "" : num(f.specSqm), areaNote: txt(f.areaNote),
       remark: f.remark != null && txt(f.remark) !== "" ? txt(f.remark) : txt(doc && doc.remarks),
       po: txt(f.po) || ((txt(doc && doc.project).match(/^[^\s,;]+/) || [""])[0]), preparedBy: txt(f.preparedBy), approvedBy: txt(f.approvedBy), formDate: txt(f.formDate) || (doc && doc.openDate) || ""
@@ -192,14 +210,14 @@
     T(m.productCode, [285, 356, 86.1, 100.2], { maxFs: 7.6 });
     T(m.project, [45, 356, 100.2, 114.4], { maxFs: 8 });
     T(m.sqm ? `${fmt(m.sqm)} ตร.ม. (sq.m.)` : "", [75, 177.6, 114.4, 128.5], { maxFs: 8.4, bold: true });
-    T(m.pcs ? String(m.pcs) : "", [237, 291, 114.4, 128.5], { maxFs: 8.4, bold: true });
-    // รายละเอียด (Details)
+    T(m.pcs ? `${m.pcs} ชิ้น` : "", [237, 291, 114.4, 128.5], { maxFs: 8.4, minFs: 5.6, bold: true });
+    // รายละเอียด (Details) — แยกตามขนาด ไม่มี Design: ขนาด · จำนวนชิ้น · ผลรวมตร.ม. ของขนาดนั้น
     const dl = m.detail.slice(0, 6), moreD = m.detail.length - dl.length;
     dl.forEach((t, i) => T(i === dl.length - 1 && moreD > 0 ? `${t}  … (+${moreD} รายการ)` : t, [179, 356, 129 + i * 9.3, 129 + (i + 1) * 9.3], { maxFs: 6.8, minFs: 4.2 }));
     T(m.quality, [68, 177.6, 128.5, 142.7], { maxFs: 7.6, minFs: 3.8 });
     T(m.designs, [61, 177.6, 142.7, 156.9], { maxFs: 7.6, minFs: 3.8 });
     T(m.delivery, [87, 177.6, 156.9, 171.0], { maxFs: 8.2, bold: true });
-    T(m.nColors ? String(m.nColors) : "", [85, 177.6, 171.0, 185.8], { maxFs: 8.4, bold: true });
+    T(m.nColorsText, [85, 177.6, 171.0, 185.8], { maxFs: 8.4, minFs: 4.4, bold: true });
     // Specs
     const sp = m.spec, t = (k, v) => { const o = SPEC[k].opts.find((x) => x[0] === v); if (o) s += tick(o[2]); };
     t("type", sp.type); sp.yarn.forEach((v) => t("yarn", v)); t("pile", sp.pile);
@@ -359,6 +377,7 @@
         <div class="mo-grid">
           ${inp("productCode", ["Product Code"])}${inp("delivery", ["กำหนดส่ง / Delivery", "ค่าเริ่มต้น: " + (autoDelivery(doc) || "วันที่ Dispatch/Postpone ล่าสุด")])}
           ${inp("po", ["PO# (หน้า 2)", "ค่าเริ่มต้น: รหัสแรกของ Project / PO"])}${inp("quality", ["คุณภาพ / Quality", "ค่าเริ่มต้น: จากรายการ"])}${inp("designNo", ["Design / PAT.", "ค่าเริ่มต้น: จากรายการ"])}
+          ${inp("nColorsNote", ["จำนวนสี / No.of Colors", `ค่าเริ่มต้น: นับจากตารางสีด้านล่าง (${cols.filter((c) => txt(c.code) || txt(c.name) || num(c.kg) || txt(c.hex)).length || 0}) — พิมพ์เองได้ เช่น "5 (POM CC010-014)"`])}
           ${inp("specSqm", ["Spec. (กก./ตร.ม.)"], "number")}${inp("preparedBy", ["จัดทำโดย"])}${inp("approvedBy", ["อนุมัติโดย (Sale Manager)"])}
         </div>
         <div class="mo-refhead"><b>อ้างถึง / Ref. (POM · S/O · M/O · อื่นๆ)</b> <span class="mo-note">ค่าเริ่มต้น: ดึงจากคอลัมน์อ้างอิงของรายการ — เพิ่ม/ลบ/แก้ไขได้ตามต้องการ ไม่จำกัดจำนวน</span></div>
