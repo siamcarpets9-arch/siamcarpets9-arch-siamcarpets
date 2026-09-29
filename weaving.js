@@ -233,7 +233,8 @@
       </div>
     </section>
 
-    ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(state.designId, "weaveissue") : ""}`;
+    ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(state.designId, "weaveissue") : ""}
+    ${typeof CostEngine !== "undefined" && CostEngine.workLogWidgetHtml ? CostEngine.workLogWidgetHtml(state.designId, "weaveissue") : ""}`;
   }
 
   function surplusPanelHtml() {
@@ -296,6 +297,7 @@
         return;
       }
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogClick && CostEngine.handleWorkLogClick(e, renderAll)) return;
       const issueBtn = e.target.closest("[data-wi-issue]");
       if (issueBtn && !issueBtn.disabled) {
         const rec = loadIssues()[state.designId];
@@ -329,6 +331,7 @@
     root.addEventListener("input", (e) => {
       if (!state.designId) return;
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange && CostEngine.handleExtraCostFieldChange(e)) return;
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogFieldChange && CostEngine.handleWorkLogFieldChange(e)) return;
       const potRow = e.target.closest("[data-pot]");
       if (potRow && e.target.name === "surplusDrawn") {
         const rec = loadIssues()[state.designId];

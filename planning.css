@@ -24,6 +24,12 @@
 .pw-size-ref-list{display:flex;flex-wrap:wrap;gap:6px}
 .pw-size-ref-item{padding:4px 8px;background:#fff;border:1px solid var(--line);font-size:10px;color:var(--ink)}
 .pw-size-ref-item em{color:var(--red);font-style:normal}
+.pw-pieces{margin-bottom:8px;padding:8px 10px;background:#f7faf9;border:1px dashed var(--line)}
+.pw-pieces-table{min-width:0;margin-bottom:8px}
+.pw-pieces-table th,.pw-pieces-table td{padding:5px 6px;font-size:10px}
+.pw-pieces-table input{width:100%;box-sizing:border-box}
+.pw-piece-label{min-width:180px}
+.pw-pieces-toggle{align-items:center}
 .pr small{color:var(--muted);font-size:9px}
 .pr strong{margin:3px 0 1px;font-size:13px}
 .pr span{color:var(--muted);font-size:9px}

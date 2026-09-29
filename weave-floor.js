@@ -523,7 +523,8 @@
       </div>
     </section>
 
-    ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(state.designId, "weavefloor") : ""}`;
+    ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(state.designId, "weavefloor") : ""}
+    ${typeof CostEngine !== "undefined" && CostEngine.workLogWidgetHtml ? CostEngine.workLogWidgetHtml(state.designId, "weavefloor") : ""}`;
   }
 
   /* ---------------- Tab 3: หน้าจอทอ (ภาพรวม) ---------------- */
@@ -1114,6 +1115,7 @@
         return;
       }
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogClick && CostEngine.handleWorkLogClick(e, renderAll)) return;
       const gotoDaily = e.target.closest("[data-goto-daily]");
       if (gotoDaily) {
         state.designId = gotoDaily.dataset.gotoDaily;
@@ -1296,6 +1298,7 @@
 
     root.addEventListener("input", (e) => {
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange && CostEngine.handleExtraCostFieldChange(e)) return;
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogFieldChange && CostEngine.handleWorkLogFieldChange(e)) return;
       const gunRow = e.target.closest("[data-gun]");
       if (gunRow && (e.target.name === "technician" || e.target.name === "reason")) {
         const dfloor = ensureDesignFloor(state.designId);

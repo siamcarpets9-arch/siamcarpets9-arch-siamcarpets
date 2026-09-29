@@ -288,7 +288,8 @@
         <label class="pf" style="margin-top:8px">หมายเหตุ (เพิ่มเติมภายหลังได้)</label>
         <textarea data-fg="note" rows="2" style="width:100%;font:inherit;padding:6px;border:1px solid var(--line)">${esc(rec.glue.note)}</textarea>
       </div>
-    </section>`;
+    </section>
+    ${typeof CostEngine !== "undefined" && CostEngine.workLogWidgetHtml ? CostEngine.workLogWidgetHtml(state.designId, "finishing") : ""}`;
   }
 
   /* ---------------- Tab 2: แห้ง + ตกแต่ง + QC ---------------- */
@@ -351,7 +352,8 @@
         <div class="pw-save-bar"><button type="button" class="action-button primary" data-add-fqc>บันทึก QC</button></div>
         ${qcRowsHtml(state.designId, state.lineIdx)}
       </div>
-    </section>`;
+    </section>
+    ${typeof CostEngine !== "undefined" && CostEngine.workLogWidgetHtml ? CostEngine.workLogWidgetHtml(state.designId, "finishing") : ""}`;
   }
 
   /* ---------------- Tab 3: ต้นทุนต่อ M/O ---------------- */
@@ -612,6 +614,7 @@
       }
 
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogClick && CostEngine.handleWorkLogClick(e, renderAll)) return;
       const moExpand = e.target.closest("[data-mo-expand]");
       if (moExpand) { toggleMoExpand(moExpand.dataset.moExpand); renderAll(); return; }
       const moOvrReset = e.target.closest("[data-mo-ovr-reset]");
@@ -764,6 +767,7 @@
 
     root.addEventListener("input", (e) => {
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange && CostEngine.handleExtraCostFieldChange(e)) { renderAll(); return; }
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogFieldChange && CostEngine.handleWorkLogFieldChange(e)) return;
       const moOvr = e.target.closest("[data-mo-ovr]");
       if (moOvr) { saveMoCostOverride(moOvr.dataset.moId, moOvr.dataset.moOvr, moOvr.value); patchMoRollupRow(moOvr.closest("[data-mo-row]"), moOvr.dataset.moOvr); return; }
       const glueItemRow = e.target.closest("[data-glueitem]");

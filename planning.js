@@ -464,11 +464,20 @@
   function blankPlan(designId, moNo, totalAreaSqm) {
     return {
       designId, moNo: moNo || "", totalAreaSqm: totalAreaSqm || 0, areaSource: totalAreaSqm ? "auto" : "manual",
+      pieces: [], // แยกพื้นที่เป็นรายชิ้น (ถ้า M/O นี้มีหลายขนาด/หลายชิ้น) — ว่าง = ยังใช้ "พื้นที่รวม" แบบกรอกค่าเดียวตามเดิม
       patternPct: 50, weaveGradeOverride: "", punchMethodOverride: "", finishGradeOverride: "",
       bufferPct: 5, zones: [blankZone(null, loadPresets())],
       hoursPerDay: 8, loomCount: 2, punchWorkers: 1, finishWorkers: 2, dyeDays: 3,
       weaveWorkers: [], punchWorkerNames: [], finishWorkerNames: [], dyeOrders: {}, weaveOutsource: null, savedAt: null
     };
+  }
+  function blankPiece(label, sqm) { return { id: uid("pc"), label: label || "", sqm: sqm || 0 }; }
+  // ผลรวมพื้นที่จากรายการชิ้น (ถ้าใช้) — เรียกทุกจุดที่ต้องอัปเดต p.totalAreaSqm ให้ตรงกับผลรวมล่าสุดเสมอ
+  function syncPiecesTotal(p) {
+    if (Array.isArray(p.pieces) && p.pieces.length) {
+      p.totalAreaSqm = p.pieces.reduce((t, pc) => t + num(pc.sqm), 0);
+      p.areaSource = "pieces";
+    }
   }
 
   /* ============================================================
@@ -576,11 +585,51 @@
     } catch (e) { return []; }
   }
 
+  // ============================================================
+  // แยกพื้นที่เป็นรายชิ้น — M/O เดียวกันบางครั้งมีหลายขนาด/หลายชิ้น (เช่น 2 ผืนคนละขนาด) ผู้วางแผนสามารถกรอกพื้นที่
+  // แต่ละชิ้นเป็นรายการแยก แล้วระบบรวมยอดให้เองเป็น "พื้นที่รวม" ที่ใช้คำนวณน้ำหนักไหม/กำหนดการ/ต้นทุนทั้งหมดต่อไป
+  // (ถ้ายังไม่ใช้ฟีเจอร์นี้ — pieces ว่าง — หน้าตาและวิธีกรอกยังเหมือนเดิมทุกประการ กรอกพื้นที่รวมเป็นค่าเดียวได้ตามปกติ)
+  // ============================================================
+  function piecesBlockHtml(p, moSizes) {
+    const pieces = p.pieces || [];
+    if (!pieces.length) {
+      return `<div class="pw-row pw-pieces-toggle">
+        ${moSizes.length ? `<div class="pw-size-ref">
+          <small>ขนาดจาก M/O ที่ฝ่ายขายเปิด (อ้างอิง — เผื่อบางบรรทัดไม่ได้กรอก ตร.ม. ไว้ ยอด "พื้นที่รวม" ด้านบนอาจไม่ครบ ตรวจสอบ/รวมเองจากรายการนี้ได้)</small>
+          <div class="pw-size-ref-list">${moSizes.map((r) => `<span class="pw-size-ref-item">${esc(r.label)} · ${fmt(r.pcs, 0)} ชิ้น${r.sqm ? ` · ${fmt(r.sqm)} ตร.ม.` : ` · <em>(ไม่ได้กรอก ตร.ม.)</em>`}</span>`).join("")}</div>
+        </div>` : ""}
+        <button type="button" class="text-button" data-pieces-start>+ แยกพื้นที่เป็นรายชิ้น (ถ้า M/O นี้มีหลายขนาด/หลายผืน กรอกทีละชิ้นแล้วรวมยอดให้อัตโนมัติ)</button>
+      </div>`;
+    }
+    return `<div class="pw-pieces">
+      <div class="pw-row"><small class="muted">กรอกพื้นที่แต่ละชิ้น/แต่ละขนาดแยกกัน ระบบจะรวมยอดเป็น "พื้นที่รวม" ด้านบนให้อัตโนมัติ${moSizes.length ? " — เทียบกับขนาดจาก M/O ที่ฝ่ายขายเปิดได้ด้านล่าง" : ""}</small></div>
+      <table class="calc-table pw-pieces-table">
+        <thead><tr><th>#</th><th>รายละเอียด/ขนาดชิ้น</th><th class="num">พื้นที่ (ตร.ม.)</th><th></th></tr></thead>
+        <tbody>${pieces.map((pc, i) => `<tr data-piece="${pc.id}">
+          <td>${i + 1}</td>
+          <td><input name="pieceLabel" value="${esc(pc.label)}" placeholder="เช่น ชิ้นที่ ${i + 1} / ขนาด 4.42x2.64 ม." class="pw-piece-label"></td>
+          <td class="num"><input name="pieceSqm" value="${esc(pc.sqm)}" inputmode="decimal" class="pw-num tiny"></td>
+          <td><button type="button" class="square-btn" data-del-piece="${pc.id}" title="ลบชิ้นนี้">×</button></td>
+        </tr>`).join("")}</tbody>
+        <tfoot><tr><td colspan="2">รวมพื้นที่จากทุกชิ้น</td><td class="num"><strong>${fmt(pieces.reduce((t, pc) => t + num(pc.sqm), 0))} ตร.ม.</strong></td><td></td></tr></tfoot>
+      </table>
+      <div class="pw-row">
+        <button type="button" class="action-button" data-add-piece>+ เพิ่มชิ้น</button>
+        ${moSizes.length ? `<button type="button" class="action-button" data-pieces-from-mo title="แทนที่รายการด้านบนด้วยขนาดจาก M/O ที่ฝ่ายขายเปิด">ดึงขนาดจาก M/O อัตโนมัติ</button>` : ""}
+        <button type="button" class="text-button" data-pieces-clear>เลิกใช้ระบบแยกชิ้น (กลับไปกรอกพื้นที่รวมเป็นค่าเดียว)</button>
+      </div>
+      ${moSizes.length ? `<div class="pw-size-ref">
+        <small>ขนาดจาก M/O ที่ฝ่ายขายเปิด (อ้างอิง)</small>
+        <div class="pw-size-ref-list">${moSizes.map((r) => `<span class="pw-size-ref-item">${esc(r.label)} · ${fmt(r.pcs, 0)} ชิ้น${r.sqm ? ` · ${fmt(r.sqm)} ตร.ม.` : ` · <em>(ไม่ได้กรอก ตร.ม.)</em>`}</span>`).join("")}</div>
+      </div>` : ""}
+    </div>`;
+  }
+
   const state = { designId: null, plan: null, editGrades: false, photoAnalysis: null, photoAnalyzing: false, dyeCostOpen: {} };
 
   function ensurePlan(designId) {
     const all = loadPlans();
-    if (all[designId]) { if (!all[designId].dyeOrders) all[designId].dyeOrders = {}; if (all[designId].weaveOutsource === undefined) all[designId].weaveOutsource = null; return all[designId]; }
+    if (all[designId]) { if (!all[designId].dyeOrders) all[designId].dyeOrders = {}; if (all[designId].weaveOutsource === undefined) all[designId].weaveOutsource = null; if (!Array.isArray(all[designId].pieces)) all[designId].pieces = []; return all[designId]; }
     const info = moInfoFor(designId);
     return blankPlan(designId, info.moNo, info.totalAreaSqm);
   }
@@ -1162,6 +1211,8 @@
 
   function buildForm() {
     const p = state.plan, presets = loadPresets(), workers = loadWorkers();
+    if (!Array.isArray(p.pieces)) p.pieces = [];
+    syncPiecesTotal(p); // กันเหนียว: ถ้าใช้ระบบแยกชิ้นอยู่ ให้ "พื้นที่รวม" ตรงกับผลรวมล่าสุดเสมอ ก่อนคำนวณทุกอย่างต่อ
     const weaveGrade = p.weaveGradeOverride ? WEAVE_GRADES.find((g) => g.grade === p.weaveGradeOverride) : suggestGrade(WEAVE_GRADES, p.patternPct);
     const punchGrade = p.punchMethodOverride ? PUNCH_GRADES.find((g) => `${g.grade}|${g.method}` === p.punchMethodOverride) : suggestGrade(PUNCH_GRADES, p.patternPct);
     const finishGrade = p.finishGradeOverride ? FINISH_GRADES.find((g) => g.grade === p.finishGradeOverride) : suggestGrade(FINISH_GRADES, p.patternPct);
@@ -1195,13 +1246,10 @@
       <div class="pw-body">
         <div class="pw-row">
           ${res("Design", esc(p.designId))}${res("M/O", esc(p.moNo || "-"))}${res("โปรเจกต์", esc(info.project || "-"))}${res("ลูกค้า", esc(info.customer || "-"))}
-          ${field("พื้นที่รวม (ตร.ม.)", inp("totalAreaSqm", p.totalAreaSqm, 'class="pw-num"'))}
+          ${p.pieces && p.pieces.length ? res("พื้นที่รวม (ตร.ม.)", `${fmt(num(p.totalAreaSqm))} <small>(รวมจาก ${p.pieces.length} ชิ้นด้านล่าง)</small>`, "main") : field("พื้นที่รวม (ตร.ม.)", inp("totalAreaSqm", p.totalAreaSqm, 'class="pw-num"'))}
           ${field("% พื้นที่มีลวดลาย (% ลาย)", inp("patternPct", p.patternPct, 'class="pw-num"'))}
         </div>
-        ${moSizes.length ? `<div class="pw-size-ref">
-          <small>ขนาดจาก M/O ที่ฝ่ายขายเปิด (อ้างอิง — เผื่อบางบรรทัดไม่ได้กรอก ตร.ม. ไว้ ยอด "พื้นที่รวม" ด้านบนอาจไม่ครบ ตรวจสอบ/รวมเองจากรายการนี้ได้)</small>
-          <div class="pw-size-ref-list">${moSizes.map((r) => `<span class="pw-size-ref-item">${esc(r.label)} · ${fmt(r.pcs, 0)} ชิ้น${r.sqm ? ` · ${fmt(r.sqm)} ตร.ม.` : ` · <em>(ไม่ได้กรอก ตร.ม.)</em>`}</span>`).join("")}</div>
-        </div>` : ""}
+        ${piecesBlockHtml(p, moSizes)}
         ${photoAnalysisPanelHtml(p)}
         ${showGradeEdit ? `<div class="pw-row">
           ${field("เกรดทอ (เว้นว่าง = อัตโนมัติ)", `<select name="weaveGradeOverride"><option value="">อัตโนมัติ</option>${WEAVE_GRADES.map((g) => `<option value="${g.grade}" ${p.weaveGradeOverride === g.grade ? "selected" : ""}>${g.grade}</option>`).join("")}</select>`)}
@@ -1323,6 +1371,7 @@
     </section>
 
     ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(p.designId, "planning") : ""}
+    ${typeof CostEngine !== "undefined" && CostEngine.workLogWidgetHtml ? CostEngine.workLogWidgetHtml(p.designId, "planning") : ""}
 
     <div class="pw-save-bar"><button type="button" class="action-button primary" data-save-plan>บันทึกแผนและส่งเข้า Master Plan Gantt</button>${p.savedAt ? `<small>บันทึกล่าสุด ${new Date(p.savedAt).toLocaleString("th-TH")}</small>` : ""}</div>`;
   }
@@ -1419,6 +1468,7 @@
         return;
       }
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderForm)) return;
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogClick && CostEngine.handleWorkLogClick(e, renderForm)) return;
       const useMatPrice = e.target.closest("[data-use-material-price]");
       if (useMatPrice) {
         const order = state.plan.dyeOrders[useMatPrice.dataset.useMaterialPrice];
@@ -1450,6 +1500,41 @@
       }
       const delZone = e.target.closest("[data-del-zone]");
       if (delZone) { state.plan.zones = state.plan.zones.filter((z) => z.id !== delZone.dataset.delZone); renderForm(); return; }
+      const piecesStart = e.target.closest("[data-pieces-start]");
+      if (piecesStart) {
+        state.plan.pieces = [blankPiece("ชิ้นที่ 1", state.plan.totalAreaSqm), blankPiece("ชิ้นที่ 2", 0)];
+        syncPiecesTotal(state.plan);
+        renderForm();
+        return;
+      }
+      const piecesFromMo = e.target.closest("[data-pieces-from-mo]");
+      if (piecesFromMo) {
+        const sizes = moLineSizesRef(state.plan.designId);
+        if (sizes.length && confirm(`แทนที่รายการชิ้นปัจจุบันด้วยขนาดจาก M/O ทั้งหมด ${sizes.length} รายการหรือไม่?`)) {
+          state.plan.pieces = sizes.map((s) => blankPiece(`${s.label}${s.pcs > 1 ? ` (${s.pcs} ชิ้น)` : ""}`, s.sqm));
+          syncPiecesTotal(state.plan);
+          renderForm();
+        }
+        return;
+      }
+      const piecesClear = e.target.closest("[data-pieces-clear]");
+      if (piecesClear) {
+        if (confirm("เลิกใช้ระบบแยกชิ้น แล้วกลับไปกรอก \"พื้นที่รวม\" เป็นค่าเดียว (ค่าล่าสุดที่รวมได้จะยังคงอยู่) หรือไม่?")) {
+          state.plan.pieces = [];
+          state.plan.areaSource = "manual";
+          renderForm();
+        }
+        return;
+      }
+      const addPiece = e.target.closest("[data-add-piece]");
+      if (addPiece) { state.plan.pieces.push(blankPiece(`ชิ้นที่ ${state.plan.pieces.length + 1}`, 0)); renderForm(); return; }
+      const delPiece = e.target.closest("[data-del-piece]");
+      if (delPiece) {
+        state.plan.pieces = state.plan.pieces.filter((pc) => pc.id !== delPiece.dataset.delPiece);
+        syncPiecesTotal(state.plan);
+        renderForm();
+        return;
+      }
       const addMix = e.target.closest("[data-add-mix]");
       if (addMix) {
         const zone = zoneById(addMix.dataset.addMix);
@@ -1522,6 +1607,17 @@
       if (!state.plan) return;
       if (e.target.name === "dyeCapKg") { saveDyeCapKg(e.target.value); renderForm(); return; }
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange && CostEngine.handleExtraCostFieldChange(e)) { renderForm(); return; }
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogFieldChange && CostEngine.handleWorkLogFieldChange(e)) { renderForm(); return; }
+      const pieceRow = e.target.closest("[data-piece]");
+      if (pieceRow) {
+        const pc = (state.plan.pieces || []).find((x) => x.id === pieceRow.dataset.piece);
+        if (pc) {
+          if (e.target.name === "pieceLabel") pc.label = e.target.value;
+          else if (e.target.name === "pieceSqm") { pc.sqm = e.target.value; syncPiecesTotal(state.plan); }
+          renderForm();
+        }
+        return;
+      }
       const mixRow = e.target.closest("[data-mixrow]");
       if (mixRow) {
         const [zoneId, mixId] = mixRow.dataset.mixrow.split(":");
@@ -1541,6 +1637,14 @@
         const name = e.target.name;
         if (name === "byArea") zone.byArea = e.target.checked;
         else if (name === "mixEnabled") { zone.mixEnabled = e.target.checked; if (zone.mixEnabled && (!Array.isArray(zone.mix) || !zone.mix.length)) zone.mix = [blankMixRow(), blankMixRow()]; }
+        // ★ บั๊กที่แก้: <select> (weaveType/yarnCode/presetId) ยิง event "input" ก่อน "change" เสมอ — ถ้าปล่อยให้ตกไปโดน
+        // เงื่อนไข else ด้านล่าง (ตั้งค่าตรง ๆ ไม่ประมวลผล preset) แล้ว renderForm() ที่ตามมาจะ re-render DOM ใหม่ทั้งก้อน
+        // ทำให้ <select> ตัวเดิมหลุดจากหน้าเว็บก่อน event "change" จะ bubble ไปถึง root ได้ (event "change" เลย "หาย" ไปเงียบ ๆ)
+        // ผลคือเลือกคุณภาพ (เช่น HWO 55C) แล้วช่อง FPH/TPH/น้ำหนักไม่อัปเดตตาม หรือเปลี่ยนเทคนิคทอแล้ว presetId ไม่ถูกล้าง
+        // จึงต้องประมวลผลให้ถูกต้อง "ที่นี่" (ตอน input) ไปเลย ไม่พึ่ง event "change" อีกต่อไป (โค้ดใน change ยังเก็บไว้เผื่อ browser ไหนไม่ยิง input ให้ select)
+        else if (name === "weaveType") { zone.weaveType = e.target.value; zone.presetId = ""; }
+        else if (name === "yarnCode") { zone.yarnCode = e.target.value; zone.presetId = ""; const yt = YARN_TYPES_DEFAULT.find((y) => y.code === e.target.value); if (yt) zone.Tex = yt.tex; }
+        else if (name === "presetId") { applyPreset(zone, e.target.value); }
         else if (["S", "R", "FPH", "TPH", "N", "Tex", "pct", "area"].includes(name)) { zone[name] = e.target.value; if (name !== "pct" && name !== "area") zone.presetId = ""; }
         else zone[name] = e.target.value;
         renderForm();

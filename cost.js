@@ -730,6 +730,93 @@
     return true;
   }
 
+  /* ============================================================
+     บันทึกเวลาทำงานรายวันต่องาน — ทุกแผนก (วางแผน/ย้อม/ตอกลาย/เบิกเส้นด้าย/ทอ/ตกแต่ง) เพิ่มรายการได้เอง
+     แยกเก็บต่อ M/O + ต่อแผนก (งานเดียวกันผ่านหลายแผนก แต่ละแผนกบันทึกเวลาทำงาน/คนของตัวเองแยกกัน)
+     รูปแบบ: { [designId]: { [dept]: [{id, date, employee, hours, note}] } }
+     ============================================================ */
+  const KEY_WORKLOG = "siam-worklog";
+  function loadWorkLogAll() { const all = readJson(KEY_WORKLOG, {}); return all && typeof all === "object" ? all : {}; }
+  function saveWorkLogAll(all) { writeJson(KEY_WORKLOG, all); }
+  function loadWorkLog(designId, dept) {
+    const all = loadWorkLogAll();
+    const list = all[designId] && all[designId][dept];
+    return Array.isArray(list) ? list : [];
+  }
+  function saveWorkLog(designId, dept, list) {
+    const all = loadWorkLogAll();
+    if (!all[designId]) all[designId] = {};
+    if (list.length) all[designId][dept] = list; else delete all[designId][dept];
+    if (!Object.keys(all[designId]).length) delete all[designId];
+    saveWorkLogAll(all);
+  }
+  function addWorkLogRow(designId, dept) {
+    const list = loadWorkLog(designId, dept);
+    list.push({ id: "wl" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), date: isoToday(), employee: "", hours: "", note: "" });
+    saveWorkLog(designId, dept, list);
+    return list;
+  }
+  function removeWorkLogRow(designId, dept, id) { saveWorkLog(designId, dept, loadWorkLog(designId, dept).filter((r) => r.id !== id)); }
+  function updateWorkLogRow(designId, dept, id, field, value) {
+    const list = loadWorkLog(designId, dept);
+    const row = list.find((r) => r.id === id);
+    if (row) { row[field] = value; saveWorkLog(designId, dept, list); }
+  }
+  function isoToday() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+  // รายชื่อพนักงานสำหรับ autocomplete (datalist) — ใช้ทะเบียนกลางที่มีอยู่แล้ว (ทอ/ตกแต่ง) เป็นค่าเริ่มต้น พิมพ์ชื่อใหม่ที่ไม่มีในรายการได้เสมอ (ไม่บังคับเลือกจากลิสต์)
+  function workLogEmployeeSuggestions() {
+    try { if (typeof WeaveFloorEngine !== "undefined" && WeaveFloorEngine.loadWeaveWorkers) return WeaveFloorEngine.loadWeaveWorkers(); } catch (e) { /* ไม่มี WeaveFloorEngine */ }
+    return [];
+  }
+  // วิดเจ็ตสำเร็จรูปให้ทุกแผนก embed ได้เหมือนกัน — ผูกกับ designId+dept (แต่ละแผนกเห็นเฉพาะรายการเวลาทำงานของตัวเอง)
+  // (เช็ค data-worklog-add ในตัวจัดการ click, และ data-worklog-row ในตัวจัดการ input/change ของไฟล์ที่ embed)
+  function workLogWidgetHtml(designId, dept) {
+    const list = loadWorkLog(designId, dept);
+    const totalHours = list.reduce((t, r) => t + num(r.hours), 0);
+    const suggestions = workLogEmployeeSuggestions();
+    const listId = `wlEmp_${esc(dept)}`;
+    return `<section class="department-panel pw-card wide" data-worklog-root data-worklog-design="${esc(designId)}" data-worklog-dept="${esc(dept || "")}">
+      <div class="panel-heading"><div><strong>บันทึกเวลาทำงานรายวัน</strong><small>เพิ่มได้ทุกวัน/ทุกคน — วันที่ + ชื่อพนักงาน (พิมพ์ชื่อใหม่ได้ ไม่มีในรายการก็เพิ่มได้) + จำนวนชั่วโมง/เวลาที่ทำ</small></div></div>
+      <div class="pw-body">
+        ${suggestions.length ? `<datalist id="${listId}">${suggestions.map((w) => `<option value="${esc(w)}">`).join("")}</datalist>` : ""}
+        <table class="calc-table"><thead><tr><th>วันที่</th><th>ชื่อพนักงาน</th><th class="num">ชั่วโมง</th><th>หมายเหตุ</th><th></th></tr></thead>
+        <tbody>${list.map((r) => `<tr data-worklog-row="${esc(r.id)}">
+          <td><input type="date" name="date" value="${esc(r.date)}"></td>
+          <td><input name="employee" value="${esc(r.employee)}" placeholder="ชื่อพนักงาน" list="${listId}"></td>
+          <td><input name="hours" value="${esc(r.hours)}" inputmode="decimal" class="pw-num tiny" placeholder="ชม."></td>
+          <td><input name="note" value="${esc(r.note)}" placeholder="เช่น ทำ M/O นี้ครึ่งวัน"></td>
+          <td><button type="button" class="pw-worker-x" data-worklog-remove="${esc(r.id)}" title="ลบรายการนี้">×</button></td>
+        </tr>`).join("") || `<tr><td colspan="5" class="col-empty">ยังไม่มีรายการ — กด "+ เพิ่มรายการ" ด้านล่าง</td></tr>`}</tbody></table>
+        <div class="pw-save-bar"><button type="button" class="action-button" data-worklog-add>+ เพิ่มรายการ</button><small>รวม ${fmtHr(totalHours)} ชม.</small></div>
+      </div>
+    </section>`;
+  }
+  // ตัวจัดการ event กลาง — ไฟล์แผนกต่าง ๆ เรียกจากตัวจัดการ click/input/change ของตัวเองได้เลย (คืน true ถ้าจัดการแล้ว)
+  function handleWorkLogClick(e, rerender) {
+    const add = e.target.closest && e.target.closest("[data-worklog-add]");
+    if (add) {
+      const rootEl = add.closest("[data-worklog-root]");
+      addWorkLogRow(rootEl.dataset.worklogDesign, rootEl.dataset.worklogDept);
+      if (typeof rerender === "function") rerender();
+      return true;
+    }
+    const rm = e.target.closest && e.target.closest("[data-worklog-remove]");
+    if (rm) {
+      const rootEl = rm.closest("[data-worklog-root]");
+      removeWorkLogRow(rootEl.dataset.worklogDesign, rootEl.dataset.worklogDept, rm.dataset.worklogRemove);
+      if (typeof rerender === "function") rerender();
+      return true;
+    }
+    return false;
+  }
+  function handleWorkLogFieldChange(e) {
+    const row = e.target.closest && e.target.closest("[data-worklog-row]");
+    if (!row) return false;
+    const rootEl = row.closest("[data-worklog-root]");
+    updateWorkLogRow(rootEl.dataset.worklogDesign, rootEl.dataset.worklogDept, row.dataset.worklogRow, e.target.name, e.target.value);
+    return true;
+  }
+
   /* ---------- render: ตั้งค่า ---------- */
   const numField = (key, label, step = "1", hint = "") => `<label>${label}<input type="number" step="${step}" min="0" data-set="${key}" value="${S[key]}">${hint ? `<em>${hint}</em>` : ""}</label>`;
   const textField = (key, label, type = "time") => `<label>${label}<input type="${type}" data-set="${key}" value="${esc(S[key])}"></label>`;
@@ -1016,6 +1103,10 @@
     // ค่าใช้จ่ายอื่นต่อ M/O ที่แผนกต่าง ๆ เพิ่มเองได้ (embed ผ่าน extraCostWidgetHtml)
     KEY_EXTRA_COSTS, loadExtraCosts, extraCostsTotal: extraCostsTotalFor, allExtraCostsMap: loadExtraCostsAll,
     extraCostWidgetHtml, addExtraCost: addExtraCostRow, removeExtraCost: removeExtraCostRow, updateExtraCost: updateExtraCostRow,
-    handleExtraCostClick, handleExtraCostFieldChange
+    handleExtraCostClick, handleExtraCostFieldChange,
+    // บันทึกเวลาทำงานรายวันต่องาน ต่อแผนก — ทุกแผนก embed ผ่าน workLogWidgetHtml ได้เหมือนกัน
+    KEY_WORKLOG, loadWorkLog, allWorkLogMap: loadWorkLogAll,
+    workLogWidgetHtml, addWorkLogRow, removeWorkLogRow, updateWorkLogRow,
+    handleWorkLogClick, handleWorkLogFieldChange
   };
 })();

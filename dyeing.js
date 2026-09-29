@@ -296,7 +296,8 @@
       </div>
     </section>` : ""}
 
-    ${g.designId && typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(g.designId, "dyeing") : ""}`;
+    ${g.designId && typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(g.designId, "dyeing") : ""}
+    ${g.designId && typeof CostEngine !== "undefined" && CostEngine.workLogWidgetHtml ? CostEngine.workLogWidgetHtml(g.designId, "dyeing") : ""}`;
   }
 
   function res(label, value, cls = "") { return `<div class="pr ${cls}"><small>${label}</small><strong>${value}</strong></div>`; }
@@ -419,10 +420,12 @@
       const pick = e.target.closest("[data-dpick]");
       if (pick) { state.selectedKey = pick.dataset.dpick; if (typeof NewBadge !== "undefined" && pick.dataset.designId) NewBadge.markSeen("dyeing", pick.dataset.designId); renderAll(); return; }
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogClick && CostEngine.handleWorkLogClick(e, renderAll)) return;
     });
     root.addEventListener("input", (e) => {
       if (e.target && e.target.id === "dySearch") { state.query = e.target.value; renderAll(); return; }
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange) CostEngine.handleExtraCostFieldChange(e);
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogFieldChange) CostEngine.handleWorkLogFieldChange(e);
     });
   }
 

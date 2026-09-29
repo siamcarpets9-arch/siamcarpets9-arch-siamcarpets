@@ -286,7 +286,8 @@
       </div>
     </section>
 
-    ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(state.designId, "pattern") : ""}`;
+    ${typeof CostEngine !== "undefined" && CostEngine.extraCostWidgetHtml ? CostEngine.extraCostWidgetHtml(state.designId, "pattern") : ""}
+    ${typeof CostEngine !== "undefined" && CostEngine.workLogWidgetHtml ? CostEngine.workLogWidgetHtml(state.designId, "pattern") : ""}`;
   }
 
   function build() {
@@ -375,6 +376,7 @@
         return;
       }
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogClick && CostEngine.handleWorkLogClick(e, renderAll)) return;
     });
     root.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && e.target && e.target.id === "ppNewWorkerName") {
@@ -387,6 +389,7 @@
     });
     root.addEventListener("input", (e) => {
       if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange && CostEngine.handleExtraCostFieldChange(e)) return;
+      if (typeof CostEngine !== "undefined" && CostEngine.handleWorkLogFieldChange && CostEngine.handleWorkLogFieldChange(e)) return;
       if (!e.target.name) return;
       saveField(e.target.name, e.target.value);
     });
