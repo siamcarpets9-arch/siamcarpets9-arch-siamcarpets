@@ -191,13 +191,16 @@
     const isSkipped = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.isSkipped ? OverviewEngine.isSkipped(id) : false;
     const isSO = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.typeOf ? OverviewEngine.typeOf({ id }) === "SO" : false;
     const refs = [];
-    Object.keys(floor).forEach((designId) => {
+    // รวม designId จากทั้งแผนกทอ (floor) และรายการที่แผนกตกแต่งเพิ่มเอง (finishAll) — รายการเพิ่มเองอาจอยู่ใน M/O
+    // ที่ยังไม่เคยผ่านแผนกทอเลยก็ได้ (เช่น รับตรงจากลูกค้า) จึงต้องดูทั้งสองแหล่งข้อมูล ไม่ใช่แค่ designId ที่มีใน floor
+    const allDesignIds = new Set([...Object.keys(floor), ...Object.keys(finishAll)]);
+    allDesignIds.forEach((designId) => {
       if (isSkipped(designId)) return;
       if (isSO(designId)) return; // S/O ยังไม่นำมาใช้ในกระบวนการผลิตตอนนี้ (ซ่อนทั้งระบบ)
       const plan = WF().planFor(designId);
       if (!plan) return;
       const lines = WF().linesOf(designId, plan);
-      const pieces = floor[designId].pieces || {};
+      const pieces = (floor[designId] && floor[designId].pieces) || {};
       Object.keys(pieces).forEach((lineIdx) => {
         const piece = pieces[lineIdx];
         if (!piece.transferredToGlueAt) return;
@@ -231,10 +234,22 @@
     return `<div class="control-strip"><div class="segmented">${tabs.map(([k, l]) => `<button type="button" class="view-btn ${state.tab === k ? "active" : ""}" data-fntab="${k}">${l}</button>`).join("")}</div></div>`;
   }
 
-  // "+ เพิ่มรายการ" — เพิ่มรายการที่แผนกตกแต่งเองได้ (เช่น รับตรงจากลูกค้า/งานแก้ไข ที่ไม่ได้ผ่านแผนกทอ) ผูกกับ M/O ที่กำลังเลือกอยู่เท่านั้น (เลือก M/O จากการ์ดด้านล่างก่อน)
+  // "+ เพิ่มรายการ" — เพิ่มรายการที่แผนกตกแต่งเองได้ (เช่น รับตรงจากลูกค้า/งานแก้ไข ที่ไม่ได้ผ่านแผนกทอ)
+  // แสดงตลอดเวลา (ไม่ต้องเลือกชิ้นในคิวก่อน) — เลือก M/O จาก dropdown เอาเอง เผื่อ M/O นั้นยังไม่เคยมีชิ้นไหนโอนมาที่แผนกนี้เลย
   function addFinishPieceBarHtml() {
-    if (!state.designId) return "";
-    return `<div class="pw-save-bar" style="margin-bottom:8px"><button type="button" class="action-button" data-add-finish-piece="${esc(state.designId)}">+ เพิ่มรายการ (สำหรับ M/O ที่เลือกอยู่)</button></div>`;
+    const plans = PE().readJson(PE().KEY_PLANS, {});
+    const isSkipped = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.isSkipped ? OverviewEngine.isSkipped(id) : false;
+    const isSO = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.typeOf ? OverviewEngine.typeOf({ id }) === "SO" : false;
+    const options = Object.keys(plans)
+      .filter((id) => !isSkipped(id) && !isSO(id))
+      .map((id) => ({ id, label: plans[id].moNo || id }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    if (!options.length) return `<p class="col-empty">ยังไม่มีใบวางแผนงาน M/O ในระบบ — ต้องบันทึกใบวางแผนงานที่หน้า "ใบวางแผนงาน" ก่อนจึงจะเพิ่มรายการที่แผนกตกแต่งได้</p>`;
+    const selectedId = state.designId && options.some((o) => o.id === state.designId) ? state.designId : options[0].id;
+    return `<div class="pw-row" style="margin-bottom:8px">
+      ${field("เพิ่มรายการเองให้ M/O", `<select id="fnAddPieceDesign">${options.map((o) => `<option value="${esc(o.id)}" ${o.id === selectedId ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`)}
+      <button type="button" class="action-button primary" data-add-finish-piece>+ เพิ่มรายการ</button>
+    </div>`;
   }
 
   function pieceJobPickerHtml() {
@@ -647,7 +662,9 @@
       if (pick) { state.designId = pick.dataset.fnpickDesign; state.lineIdx = pick.dataset.fnpickLine; if (typeof NewBadge !== "undefined") NewBadge.markSeen("finishing", state.designId); renderAll(); return; }
       const addFinPiece = e.target.closest("[data-add-finish-piece]");
       if (addFinPiece) {
-        const designId = addFinPiece.dataset.addFinishPiece;
+        const sel = $("#fnAddPieceDesign");
+        const designId = sel ? sel.value : null;
+        if (!has(designId)) { toast("เลือก M/O ก่อน"); return; }
         const key = addExtraFinishPiece(designId);
         state.designId = designId; state.lineIdx = key; state.tab = "glue";
         toast("เพิ่มรายการใหม่แล้ว — กรอกชื่อรายการ/ข้อมูลด้านล่างได้เลย");
