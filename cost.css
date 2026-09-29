@@ -114,3 +114,11 @@
 @media(max-width:1100px){.cost-kpi-grid{grid-template-columns:repeat(3,1fr)}.cost-two-col{grid-template-columns:1fr}.trip-form{grid-template-columns:repeat(3,1fr)}.trip-people,.trip-note{grid-column:1/-1}}
 @media(max-width:900px){.cost-filters{justify-content:flex-start;margin-top:10px}.cost-filters input{width:100%}.cost-actions{justify-content:flex-start}.cost-mini-kpis{margin:10px 0}}
 @media(max-width:520px){.cost-kpi-grid{grid-template-columns:repeat(2,1fr)}.trip-form{grid-template-columns:1fr}}
+
+/* ============ สรุปต้นทุนต่อ M/O (ทุกแผนก) — ทุกช่องตัวเลขคีย์แก้ไขทับค่าอัตโนมัติได้โดยตรง ============ */
+.pw-mo-cost-table{min-width:1180px}
+.pw-mo-ovr-cell{display:inline-flex;align-items:center;gap:3px}
+.pw-mo-ovr-cell input{width:80px;text-align:right}
+.pw-mo-ovr-cell button{padding:2px 4px;font-size:11px;line-height:1}
+.pw-mo-extra-row td{background:#f7faf9;padding:10px}
+.pw-mo-extra-row .department-panel{border:0;background:transparent}

@@ -138,7 +138,9 @@
      3) ตารางประสิทธิภาพ 3 แผนก — จาก เกรดการทอ แต่ง.xlsx ชีต "GREAD รวม" (คัดลอกค่าตรงทุกตัว)
      จัดเกรดตาม % พื้นที่มีลวดลาย (% ลาย) ของดีไซน์
      ============================================================ */
-  const WEAVE_GRADES = [
+  // ค่ามาตรฐานจากไฟล์ "เกรดการทอ แต่ง.xlsx" — ใช้เป็นค่าเริ่มต้น/ค่าสำหรับปุ่ม "รีเซ็ตเป็นค่ามาตรฐาน" เท่านั้น
+  // ตารางที่ใช้งานจริง (WEAVE_GRADES/PUNCH_GRADES/FINISH_GRADES ด้านล่าง) แก้ไข/เพิ่ม/ลบได้เองผ่านหน้า "จัดการตารางเกรด"
+  const WEAVE_GRADES_DEFAULT = [
     { grade: "A", plainPct: 80, patternPct: 20, maxColor: 3, cut: true, loop: true, cutLoopSame: false, stitchDiff: "N", rateSqmPerHr: 0.42, size: "65×65 ซม.", wage: 800 },
     { grade: "B", plainPct: 60, patternPct: 40, maxColor: 5, cut: true, loop: true, cutLoopSame: false, stitchDiff: "N", rateSqmPerHr: 0.39, size: "62.5×62.5 ซม.", wage: 900 },
     { grade: "C", plainPct: 50, patternPct: 50, maxColor: 7, cut: true, loop: true, cutLoopSame: false, stitchDiff: "N", rateSqmPerHr: 0.30, size: "55×55 ซม.", wage: 1000 },
@@ -151,7 +153,7 @@
   ];
   const WAGE_GLUE_FINISH = 400; // ทากาว/แต่ง บาท (คงที่ทุกเกรด)
 
-  const PUNCH_GRADES = [
+  const PUNCH_GRADES_DEFAULT = [
     { grade: "A&B", method: "ฆ้อน", plainPct: 100, patternPct: 0, rateSqmPerHr: 1.25, note: "ตีกรอบ/ตีเส้นตามแปลน" },
     { grade: "C", method: "ฆ้อน", plainPct: 80, patternPct: 20, rateSqmPerHr: 1.15, note: "ลายห่าง 20% ของพื้นที่" },
     { grade: "D", method: "ฆ้อน", plainPct: 50, patternPct: 50, rateSqmPerHr: 0.45, note: "Repeat ทั้งหมด ลาย 50%" },
@@ -159,7 +161,7 @@
     { grade: "E", method: "เครื่องเจาะ", plainPct: 20, patternPct: 80, rateSqmPerHr: 0.43, note: "ใช้เครื่องเจาะแทนฆ้อน" }
   ];
 
-  const FINISH_GRADES = [
+  const FINISH_GRADES_DEFAULT = [
     { grade: "A", plainPct: 100, patternPct: 0, shearPct: null, rateSqmPerHr: 1.00, note: "ไม่มีลาย สีเดี่ยว" },
     { grade: "B", plainPct: 80, patternPct: 20, shearPct: 0.2, rateSqmPerHr: 0.75, note: "มีลาย 20%" },
     { grade: "C", plainPct: 50, patternPct: 50, shearPct: 0.5, rateSqmPerHr: 0.50, note: "มีลายไม่เกิน 50%" },
@@ -167,6 +169,23 @@
     { grade: "E", plainPct: 20, patternPct: 80, shearPct: 0.8, rateSqmPerHr: 0.16, note: "ลายจัด" },
     { grade: "X", plainPct: 10, patternPct: 90, shearPct: 0.9, rateSqmPerHr: 0.10, note: "ลายจัด / แกะลายพิเศษ" }
   ];
+
+  const KEY_WEAVE_GRADES = "siam-weave-grades";
+  const KEY_PUNCH_GRADES = "siam-punch-grades";
+  const KEY_FINISH_GRADES = "siam-finish-grades";
+  function loadWeaveGrades() { const g = readJson(KEY_WEAVE_GRADES, null); return Array.isArray(g) && g.length ? g : (() => { const seeded = WEAVE_GRADES_DEFAULT.map((x) => ({ ...x })); writeJson(KEY_WEAVE_GRADES, seeded); return seeded; })(); }
+  function loadPunchGrades() { const g = readJson(KEY_PUNCH_GRADES, null); return Array.isArray(g) && g.length ? g : (() => { const seeded = PUNCH_GRADES_DEFAULT.map((x) => ({ ...x })); writeJson(KEY_PUNCH_GRADES, seeded); return seeded; })(); }
+  function loadFinishGrades() { const g = readJson(KEY_FINISH_GRADES, null); return Array.isArray(g) && g.length ? g : (() => { const seeded = FINISH_GRADES_DEFAULT.map((x) => ({ ...x })); writeJson(KEY_FINISH_GRADES, seeded); return seeded; })(); }
+
+  // ตารางที่ใช้งานจริงทั้งแอป (ทุกไฟล์อ่านผ่าน window.PlanningEngine.WEAVE_GRADES ฯลฯ) — เป็น let ไม่ใช่ const เพราะแก้ไขได้ผ่านหน้า "จัดการตารางเกรด"
+  let WEAVE_GRADES = loadWeaveGrades();
+  let PUNCH_GRADES = loadPunchGrades();
+  let FINISH_GRADES = loadFinishGrades();
+  // เขียนทับค่าที่ export ไว้ให้ไฟล์อื่น (finishing.js/pattern.js/weave-floor.js/weaving.js/overview.js ฯลฯ) เห็นตารางล่าสุดทันทีที่แก้
+  function syncGradeExports() { if (window.PlanningEngine) Object.assign(window.PlanningEngine, { WEAVE_GRADES, PUNCH_GRADES, FINISH_GRADES }); }
+  function saveWeaveGrades(list) { WEAVE_GRADES = list; writeJson(KEY_WEAVE_GRADES, list); syncGradeExports(); }
+  function savePunchGrades(list) { PUNCH_GRADES = list; writeJson(KEY_PUNCH_GRADES, list); syncGradeExports(); }
+  function saveFinishGrades(list) { FINISH_GRADES = list; writeJson(KEY_FINISH_GRADES, list); syncGradeExports(); }
 
   function suggestGrade(table, patternPct) {
     const p = num(patternPct);
@@ -353,7 +372,7 @@
   function isoToDate(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "")); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; }
   function blankDyeOrder(dyeSeg) {
     return {
-      source: "inhouse", vendor: "", lot: "", method: "CtoC", methodOther: "", matching: "",
+      source: "inhouse", vendor: "", lot: "", yarnType: "", qualityNote: "", method: "CtoC", methodOther: "", matching: "",
       rewind: false, twist: false, ply: false,
       buyYarn: false, yarnPricePerKg: 0, serviceFeePerKg: 0,
       special: false, surchargePct: 0,
@@ -397,6 +416,7 @@
   const WEAVE_TYPE_LABEL = { loop: "Loop", tipshear: "Tip Shear", cutside: "Cut to Side", cutcut: "Cut to Cut", custom: "Cut (อื่น ๆ)" };
 
   function loadPresets() { const p = readJson(KEY_PRESETS, null); return Array.isArray(p) && p.length ? p : (() => { const seeded = seedPresets(); writeJson(KEY_PRESETS, seeded); return seeded; })(); }
+  function savePresets(list) { writeJson(KEY_PRESETS, list); }
   function loadWorkers() { const w = readJson(KEY_WORKERS, null); return Array.isArray(w) && w.length ? w : (() => { writeJson(KEY_WORKERS, WORKERS_DEFAULT); return WORKERS_DEFAULT.slice(); })(); }
   function saveWorkers(list) { writeJson(KEY_WORKERS, list); }
   // หมายเหตุ: การเพิ่ม/ลบ/นำเข้า/ส่งออกรายชื่อพนักงาน จัดการที่แท็บ "แผนกทอ (จอทอรายวัน)" แล้ว (ใช้คีย์ localStorage ร่วมกัน — KEY_WORKERS)
@@ -538,6 +558,22 @@
       }
     } catch (e) { /* ไม่มี SalesEngine ก็ให้กรอกพื้นที่เอง */ }
     return { row, moNo, totalAreaSqm };
+  }
+
+  // รายการ "ขนาด/size" ต่อบรรทัดของ M/O นี้ — ไว้โชว์เป็นข้อมูลอ้างอิงข้าง ๆ ช่อง "พื้นที่รวม" เท่านั้น (ไม่เปลี่ยนวิธีคำนวณยอดรวม)
+  // เพราะบาง M/O ฝ่ายขายกรอกแค่ "ขนาด" เป็นตัวหนังสือ (เช่น "4.42 x 2.64 M.") ไว้ โดยไม่ได้กรอกตัวเลข ตร.ม. ต่อบรรทัด
+  // ทำให้ยอดรวมที่ดึงมาอัตโนมัติ (sum ของ l.sqm) อาจไม่ครบ — ผู้วางแผนจึงต้องเห็นรายการขนาดจริงไว้เทียบ/ตรวจสอบเอง
+  function moLineSizesRef(designId) {
+    try {
+      if (typeof SalesEngine === "undefined" || !SalesEngine.getDocs) return [];
+      const doc = SalesEngine.getDocs().find((d) => d.designId === designId && d.type === "MO");
+      if (!doc) return [];
+      return (doc.lines || []).map((l) => ({
+        label: has(l.size) ? l.size : (has(l.location) ? l.location : (has(l.design) ? l.design : "-")),
+        pcs: l.pcs != null && l.pcs !== "" ? num(l.pcs) : 1,
+        sqm: num(l.sqm)
+      })).filter((r) => r.label !== "-" || r.sqm);
+    } catch (e) { return []; }
   }
 
   const state = { designId: null, plan: null, editGrades: false, photoAnalysis: null, photoAnalyzing: false, dyeCostOpen: {} };
@@ -686,6 +722,11 @@
         if (price != null) o.yarnPricePerKg = price;
         // เกินเกณฑ์ย้อมในบริษัท (ค่าเริ่มต้น 20 กก./หม้อ แก้ไขได้) — แนะนำส่งจ้างย้อมภายนอกให้อัตโนมัติตอนสร้างใบสั่งย้อมใหม่ ยังสลับกลับเองได้เสมอ
         if (num(pot.netKg) > loadDyeCapKg()) o.source = "outsource";
+        // ตั้งต้น "ชนิดไหม/คุณภาพ" ให้จากโซนที่ใช้จริง (ยังคีย์ทับเองได้เสมอ — เผื่อของจริงเป็นคนละยี่ห้อ/lot กับที่ตั้งไว้ในระบบ)
+        if (yarnCode) o.yarnType = yarnCode;
+        const presetId = pot.zones && pot.zones[0] && pot.zones[0].presetId;
+        const preset = presetId ? loadPresets().find((pr) => pr.id === presetId) : null;
+        if (preset) o.qualityNote = preset.label;
       }
       if (o.issueDateAuto !== false) o.issueDate = isoDate(offsetToDate(dyeSeg.start));
       if (o.needDateAuto !== false) o.needDate = isoDate(offsetToDate(dyeSeg.end));
@@ -709,7 +750,9 @@
         <label class="pf">แหล่งย้อม<select name="source">${[["inhouse", "ย้อมภายในบริษัท"], ["outsource", "จ้างย้อมบริษัทอื่น"]].map(([v, t]) => `<option value="${v}" ${order.source === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         ${overCap ? `<span class="pw-dye-warn">⚠ หม้อนี้ ${fmt(pot.netKg, 3)} กก. เกินเกณฑ์ย้อมในบริษัท (${fmt(capKg, 1)} กก.) — ควรสลับเป็น "จ้างย้อมบริษัทอื่น"</span>` : ""}
         ${isOut ? field("ชื่อผู้รับจ้างย้อม", inp("vendor", order.vendor, 'inputmode="text"')) : ""}
+        ${field("ชนิดไหม", inp("yarnType", order.yarnType, 'inputmode="text" placeholder="เช่น WOOL AMW"'))}
         ${field("Yarn Lot", inp("lot", order.lot, 'inputmode="text"'))}
+        ${field("คุณภาพ", inp("qualityNote", order.qualityNote, 'inputmode="text" placeholder="เช่น HWO 450 C,L"'))}
         <label class="pf">วิธีย้อม<select name="method">${DYE_METHODS.map((m) => `<option value="${m.value}" ${order.method === m.value ? "selected" : ""}>${m.label}</option>`).join("")}</select></label>
         ${order.method === "other" ? field("ระบุวิธีย้อม", inp("methodOther", order.methodOther, 'inputmode="text"')) : ""}
         <label class="pf" title="ค่าเริ่มต้น: ${esc(matchingLabel(autoMatchingOfPot(pot)))} (เดาจากลักษณะขนของหม้อนี้) — เลือกเองถ้าลูกค้ากำหนดให้เทียบกับตัวอย่างคนละแบบ">เทียบสี/Matching<select name="matching">${MATCHING_OPTS.map((m) => `<option value="${m.value}" ${order.matching === m.value ? "selected" : ""}>${m.value === "" ? `(อัตโนมัติ: ${matchingLabel(autoMatchingOfPot(pot))})` : m.label}</option>`).join("")}</select></label>
@@ -769,6 +812,8 @@
         <div><b>หม้อย้อม/โซนสี:</b> ${esc(pot.label)}</div>
         <div><b>เทียบสี/Matching:</b> ${esc(matchingLabel(effectiveMatching(order, pot)))}</div>
         <div><b>Yarn Code:</b> ${esc(firstZone.yarnCode || "-")} · Tex ${esc(firstZone.Tex || "-")}</div>
+        <div><b>ชนิดไหม:</b> ${esc(order.yarnType || "-")}</div>
+        <div><b>คุณภาพ:</b> ${esc(order.qualityNote || "-")}</div>
         <div><b>น้ำหนักไหมสุทธิ:</b> ${fmt(pot.netKg, 3)} กก.</div>
         <div><b>แหล่งย้อม:</b> ${isOut ? "จ้างย้อมบริษัทอื่น" : "ย้อมภายในบริษัท"}${isOut && order.vendor ? " — " + esc(order.vendor) : ""}</div>
         <div><b>วิธีย้อม:</b> ${esc(order.method === "other" ? order.methodOther : methodLabel)}</div>
@@ -827,6 +872,268 @@
   }
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { const r = document.getElementById("pwPrint"); if (r && !r.hidden) closeDyePrint(); } });
 
+  // ============================================================
+  // จัดการสเปกคุณภาพไหม/การทอ (Tufting Spec.) — ตารางเดียวกับ "สเปคการคำนวณไหม" และ "สเปกการทอ"
+  // (Stitch/Row/Pile Height/Tex/จำนวนเส้นไหม ขับทั้งน้ำหนักไหมสั่งย้อมและพารามิเตอร์การทอจากค่าเดียวกัน)
+  // เปิดจากปุ่มในข้อ 1) ของหน้าวางแผน — แก้/เพิ่ม/ลบคุณภาพได้เอง บันทึกลง localStorage ทันทีที่แก้ (เหมือน dye order)
+  // (ตารางเกรดแรงงาน WEAVE_GRADES/PUNCH_GRADES/FINISH_GRADES เป็นคนละชุดข้อมูล แก้ไขแยกที่หน้า "จัดการตารางเกรด" ด้านล่าง)
+  // ============================================================
+  function blankPreset() {
+    return { id: uid("q"), yarnCode: YARN_TYPES_DEFAULT[0] ? YARN_TYPES_DEFAULT[0].code : "", quality: "", structure: "cut", S: 28, R: "", FPH: "", TPH: "", PH: "", N: 4, verified: false, label: "" };
+  }
+  function ensureSpecEditorRoot() {
+    let root = document.getElementById("pwSpecEditor");
+    if (root) return root;
+    root = document.createElement("div");
+    root.id = "pwSpecEditor";
+    root.hidden = true;
+    root.innerHTML = `<div class="pw-print-bar"><strong>จัดการสเปกคุณภาพไหม/การทอ (Tufting Spec.)</strong><span class="pw-print-spacer"></span><button type="button" class="action-button" data-spec-action="add">+ เพิ่มคุณภาพใหม่</button><button type="button" data-spec-action="reset">รีเซ็ตเป็นค่ามาตรฐาน</button><button type="button" class="primary" data-spec-action="close">ปิด</button></div><div class="pw-print-scroll"></div>`;
+    document.body.appendChild(root);
+    root.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-spec-action]");
+      if (btn) {
+        const action = btn.dataset.specAction;
+        if (action === "close") { closeSpecEditor(); return; }
+        if (action === "add") { savePresets([...loadPresets(), blankPreset()]); renderSpecEditor(); return; }
+        if (action === "reset") {
+          if (!confirm('รีเซ็ตตารางคุณภาพทั้งหมดกลับเป็นค่ามาตรฐานจากไฟล์ "Tufting Spec." — รายการที่เพิ่ม/แก้เองไว้จะหายทั้งหมด ยืนยันหรือไม่?')) return;
+          savePresets(seedPresets());
+          renderSpecEditor();
+          toast("รีเซ็ตตารางคุณภาพเป็นค่ามาตรฐานแล้ว");
+        }
+        return;
+      }
+      const del = e.target.closest("[data-spec-del]");
+      if (del) {
+        if (!confirm("ลบคุณภาพนี้ออกจากรายการ?")) return;
+        savePresets(loadPresets().filter((p) => p.id !== del.dataset.specDel));
+        renderSpecEditor();
+      }
+    });
+    root.addEventListener("input", (e) => {
+      const row = e.target.closest("[data-spec-row]");
+      if (!row) return;
+      const name = e.target.name;
+      if (!name || name === "yarnCode" || name === "structure") return; // เป็น <select> จัดการใน change listener แทน
+      const list = loadPresets();
+      const preset = list.find((p) => p.id === row.dataset.specRow);
+      if (!preset) return;
+      if (name === "quality" || name === "label") preset[name] = e.target.value;
+      else { preset[name] = e.target.value === "" ? "" : Number(e.target.value); preset.verified = false; }
+      savePresets(list); // บันทึกทันทีโดยไม่ re-render เพื่อไม่ให้ cursor กระโดดขณะพิมพ์
+    });
+    root.addEventListener("change", (e) => {
+      const row = e.target.closest("[data-spec-row]");
+      if (!row) return;
+      const list = loadPresets();
+      const preset = list.find((p) => p.id === row.dataset.specRow);
+      if (!preset) return;
+      if (e.target.name === "yarnCode") { preset.yarnCode = e.target.value; savePresets(list); return; }
+      if (e.target.name === "structure") {
+        const newStructure = e.target.value;
+        if (newStructure === preset.structure) return;
+        if (newStructure === "loop") {
+          // cut -> loop: เอาความสูงหลังเจียร์ (FPH) เดิมมาตั้งต้นเป็น PH ให้ (ใกล้เคียงที่สุดที่มีอยู่ แก้เองต่อได้)
+          preset.PH = preset.FPH || preset.PH || ""; preset.FPH = ""; preset.TPH = "";
+        } else {
+          // loop -> cut: เอา PH เดิมมาตั้งต้นเป็น FPH ให้ ส่วน TPH ไม่มีค่าตั้งต้นที่ถูกต้องแน่นอน ต้องกรอกเอง
+          preset.FPH = preset.PH || preset.FPH || ""; preset.PH = "";
+        }
+        preset.structure = newStructure;
+        preset.verified = false;
+        savePresets(list);
+        renderSpecEditor();
+      }
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { const r = document.getElementById("pwSpecEditor"); if (r && !r.hidden) closeSpecEditor(); } });
+    return root;
+  }
+  function closeSpecEditor() {
+    const root = document.getElementById("pwSpecEditor");
+    if (root) root.hidden = true;
+    renderForm(); // เผื่อแก้/ลบคุณภาพที่โซนกำลังเลือกใช้อยู่ — ให้ dropdown ในข้อ 2) อัปเดตตาม
+  }
+  function specRowHtml(preset) {
+    const isLoop = preset.structure === "loop";
+    return `<tr data-spec-row="${preset.id}">
+      <td><select name="yarnCode">${YARN_TYPES_DEFAULT.map((y) => `<option value="${y.code}" ${preset.yarnCode === y.code ? "selected" : ""}>${y.code}</option>`).join("")}</select></td>
+      <td><input name="quality" value="${esc(preset.quality)}" class="pw-num tiny"></td>
+      <td><select name="structure"><option value="cut" ${!isLoop ? "selected" : ""}>Cut</option><option value="loop" ${isLoop ? "selected" : ""}>Loop</option></select></td>
+      <td><input name="S" type="number" value="${esc(preset.S)}" class="pw-num tiny"></td>
+      <td><input name="R" type="number" value="${esc(preset.R)}" class="pw-num tiny"></td>
+      ${isLoop
+        ? `<td><input name="PH" type="number" step="0.1" value="${esc(preset.PH)}" class="pw-num tiny"></td><td class="pw-spec-na">—</td>`
+        : `<td><input name="FPH" type="number" step="0.1" value="${esc(preset.FPH)}" class="pw-num tiny"></td><td><input name="TPH" type="number" step="0.1" value="${esc(preset.TPH)}" class="pw-num tiny"></td>`}
+      <td><input name="N" type="number" value="${esc(preset.N)}" class="pw-num tiny"></td>
+      <td><input name="label" value="${esc(preset.label)}" class="pw-spec-label" placeholder="ชื่อที่แสดงในตัวเลือก"></td>
+      <td>${preset.verified ? `<span class="status-tag">✓ ยืนยันแล้ว</span>` : `<span class="status-tag review">แก้ไขเอง</span>`}</td>
+      <td><button type="button" class="text-button" data-spec-del="${preset.id}">ลบ</button></td>
+    </tr>`;
+  }
+  function renderSpecEditor() {
+    const root = ensureSpecEditorRoot();
+    const list = loadPresets();
+    const groups = {};
+    list.forEach((p) => { const k = p.yarnCode || "-"; (groups[k] = groups[k] || []).push(p); });
+    const body = Object.keys(groups).sort().map((yarnCode) => `
+      <tr class="pw-spec-group"><td colspan="11"><b>ชนิดไหม ${esc(yarnCode)}</b></td></tr>
+      ${groups[yarnCode].map(specRowHtml).join("")}
+    `).join("") || `<tr><td colspan="11" class="muted">ยังไม่มีข้อมูลคุณภาพ — กด "+ เพิ่มคุณภาพใหม่" เพื่อเริ่ม</td></tr>`;
+    root.querySelector(".pw-print-scroll").innerHTML = `
+      <p class="pw-spec-help muted">ตารางนี้คือค่าที่ใช้คำนวณทั้ง "สเปคการคำนวณไหม" (น้ำหนักไหมสั่งย้อม) และ "สเปกการทอ" (Stitch/Row/Pile Height) พร้อมกัน — แก้ตรงนี้ที่เดียวมีผลกับทั้งสองเรื่อง แก้แล้วบันทึกอัตโนมัติทันที ไม่ต้องกดบันทึกซ้ำ</p>
+      <table class="pw-spec-table"><thead><tr>
+        <th>ชนิดไหม</th><th>คุณภาพ</th><th>โครงสร้าง</th><th>Stitch(S)</th><th>Row(R)</th><th>FPH/PH (มม.)</th><th>TPH (มม.)</th><th>N</th><th>ชื่อที่แสดง</th><th>สถานะ</th><th></th>
+      </tr></thead><tbody>${body}</tbody></table>`;
+    root.hidden = false;
+  }
+
+  // ============================================================
+  // จัดการตารางเกรดแรงงาน (เกรดทอ / เกรดตอกลาย / เกรดตกแต่ง) — ใช้ suggestGrade() จับคู่ตาม "% พื้นที่มีลวดลาย" ให้อัตโนมัติ
+  // เดิมเป็นตารางคงที่ในโค้ด (จากไฟล์ "เกรดการทอ แต่ง.xlsx") ตอนนี้แก้ไข/เพิ่ม/ลบได้เอง บันทึกลง localStorage ทันที
+  // และ sync ไปที่ window.PlanningEngine ให้ทุกแผนก (ทอ/ตอกลาย/ตกแต่ง/ภาพรวม ฯลฯ) เห็นค่าล่าสุดทันทีที่แก้ ไม่ต้องรีเฟรชหน้า
+  // งานที่ "ปรับเกรดเอง" (weaveGradeOverride ฯลฯ) ไว้แล้วไม่ถูกกระทบ — มีผลเฉพาะงานที่ยังให้ระบบเลือกเกรดอัตโนมัติจาก % ลาย
+  // ============================================================
+  function blankWeaveGrade() { return { grade: "", plainPct: 0, patternPct: 0, maxColor: "", cut: true, loop: true, cutLoopSame: false, stitchDiff: "N", rateSqmPerHr: 0, size: "", wage: 0 }; }
+  function blankPunchGrade() { return { grade: "", method: "ฆ้อน", plainPct: 0, patternPct: 0, rateSqmPerHr: 0, note: "" }; }
+  function blankFinishGrade() { return { grade: "", plainPct: 0, patternPct: 0, shearPct: "", rateSqmPerHr: 0, note: "" }; }
+
+  const GRADE_TABLE_DEFS = {
+    weave: { get: () => WEAVE_GRADES, save: saveWeaveGrades, seed: () => WEAVE_GRADES_DEFAULT.map((x) => ({ ...x })), blank: blankWeaveGrade, title: "เกรดทอ" },
+    punch: { get: () => PUNCH_GRADES, save: savePunchGrades, seed: () => PUNCH_GRADES_DEFAULT.map((x) => ({ ...x })), blank: blankPunchGrade, title: "เกรดตอกลาย/ขยายลาย" },
+    finish: { get: () => FINISH_GRADES, save: saveFinishGrades, seed: () => FINISH_GRADES_DEFAULT.map((x) => ({ ...x })), blank: blankFinishGrade, title: "เกรดตกแต่ง" }
+  };
+
+  function weaveGradeRowHtml(g, idx) {
+    return `<tr data-grade-row="${idx}">
+      <td><input name="grade" value="${esc(g.grade)}" class="pw-num tiny"></td>
+      <td><input name="plainPct" type="number" step="any" value="${esc(g.plainPct)}" class="pw-num tiny"></td>
+      <td><input name="patternPct" type="number" step="any" value="${esc(g.patternPct)}" class="pw-num tiny"></td>
+      <td><input name="maxColor" value="${esc(g.maxColor)}" class="pw-num tiny" title="จำนวนสีสูงสุด (กรอก >20 ได้ถ้าไม่จำกัด)"></td>
+      <td class="pw-grade-chk"><input type="checkbox" name="cut" ${g.cut ? "checked" : ""} title="ทอแบบ Cut ได้"></td>
+      <td class="pw-grade-chk"><input type="checkbox" name="loop" ${g.loop ? "checked" : ""} title="ทอแบบ Loop ได้"></td>
+      <td class="pw-grade-chk"><input type="checkbox" name="cutLoopSame" ${g.cutLoopSame ? "checked" : ""} title="ทำ Cut+Loop ผืนเดียวกันได้"></td>
+      <td><input name="stitchDiff" value="${esc(g.stitchDiff)}" class="pw-num tiny" title="ระดับก้าวต่าง N/D/VD"></td>
+      <td><input name="rateSqmPerHr" type="number" step="any" value="${esc(g.rateSqmPerHr)}" class="pw-num tiny"></td>
+      <td><input name="size" value="${esc(g.size)}" class="pw-spec-label"></td>
+      <td><input name="wage" type="number" step="any" value="${esc(g.wage)}" class="pw-num tiny"></td>
+      <td><button type="button" class="text-button" data-grade-del="weave:${idx}">ลบ</button></td>
+    </tr>`;
+  }
+  function punchGradeRowHtml(g, idx) {
+    return `<tr data-grade-row="${idx}">
+      <td><input name="grade" value="${esc(g.grade)}" class="pw-num tiny"></td>
+      <td><input name="method" value="${esc(g.method)}" class="pw-num tiny"></td>
+      <td><input name="plainPct" type="number" step="any" value="${esc(g.plainPct)}" class="pw-num tiny"></td>
+      <td><input name="patternPct" type="number" step="any" value="${esc(g.patternPct)}" class="pw-num tiny"></td>
+      <td><input name="rateSqmPerHr" type="number" step="any" value="${esc(g.rateSqmPerHr)}" class="pw-num tiny"></td>
+      <td><input name="note" value="${esc(g.note)}" class="pw-spec-label"></td>
+      <td><button type="button" class="text-button" data-grade-del="punch:${idx}">ลบ</button></td>
+    </tr>`;
+  }
+  function finishGradeRowHtml(g, idx) {
+    return `<tr data-grade-row="${idx}">
+      <td><input name="grade" value="${esc(g.grade)}" class="pw-num tiny"></td>
+      <td><input name="plainPct" type="number" step="any" value="${esc(g.plainPct)}" class="pw-num tiny"></td>
+      <td><input name="patternPct" type="number" step="any" value="${esc(g.patternPct)}" class="pw-num tiny"></td>
+      <td><input name="shearPct" type="number" step="any" value="${g.shearPct == null || g.shearPct === "" ? "" : esc(g.shearPct)}" placeholder="ไม่เจียร์" class="pw-num tiny"></td>
+      <td><input name="rateSqmPerHr" type="number" step="any" value="${esc(g.rateSqmPerHr)}" class="pw-num tiny"></td>
+      <td><input name="note" value="${esc(g.note)}" class="pw-spec-label"></td>
+      <td><button type="button" class="text-button" data-grade-del="finish:${idx}">ลบ</button></td>
+    </tr>`;
+  }
+  const GRADE_ROW_HTML = { weave: weaveGradeRowHtml, punch: punchGradeRowHtml, finish: finishGradeRowHtml };
+  const GRADE_HEAD_COLS = {
+    weave: ["เกรด", "% เรียบ", "% ลาย", "Max สี", "Cut", "Loop", "Cut+Loop ผืนเดียวกันได้", "ก้าวต่าง", "ตร.ม./ชม./คน", "ขนาดแม่พิมพ์", "ค่าแรง/ตร.ม.", ""],
+    punch: ["เกรด", "วิธี", "% เรียบ", "% ลาย", "ตร.ม./ชม./คน", "หมายเหตุ", ""],
+    finish: ["เกรด", "% เรียบ", "% ลาย", "% เจียร์ (ว่าง=ไม่เจียร์)", "ตร.ม./ชม./คน", "หมายเหตุ", ""]
+  };
+
+  function gradeTableSectionHtml(key) {
+    const def = GRADE_TABLE_DEFS[key];
+    const list = def.get();
+    const rowFn = GRADE_ROW_HTML[key];
+    const cols = GRADE_HEAD_COLS[key];
+    return `<div class="pw-grade-section" data-grade-table="${key}">
+      <div class="pw-grade-section-head"><strong>${def.title}</strong>
+        <button type="button" class="action-button" data-grade-add="${key}">+ เพิ่มเกรด</button>
+        <button type="button" data-grade-reset="${key}">รีเซ็ตเป็นค่ามาตรฐาน</button>
+      </div>
+      <table class="pw-spec-table"><thead><tr>${cols.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
+      <tbody>${list.length ? list.map((g, i) => rowFn(g, i)).join("") : `<tr><td colspan="${cols.length}" class="muted">ยังไม่มีข้อมูล — กด "+ เพิ่มเกรด" เพื่อเริ่ม</td></tr>`}</tbody></table>
+    </div>`;
+  }
+  function ensureGradeEditorRoot() {
+    let root = document.getElementById("pwGradeEditor");
+    if (root) return root;
+    root = document.createElement("div");
+    root.id = "pwGradeEditor";
+    root.hidden = true;
+    root.innerHTML = `<div class="pw-print-bar"><strong>จัดการตารางเกรดทอ/ตอกลาย/ตกแต่ง</strong><span class="pw-print-spacer"></span><button type="button" class="primary" data-grade-close>ปิด</button></div><div class="pw-print-scroll"></div>`;
+    document.body.appendChild(root);
+    root.addEventListener("click", (e) => {
+      if (e.target.closest("[data-grade-close]")) { closeGradeEditor(); return; }
+      const addBtn = e.target.closest("[data-grade-add]");
+      if (addBtn) {
+        const def = GRADE_TABLE_DEFS[addBtn.dataset.gradeAdd];
+        def.save([...def.get(), def.blank()]);
+        renderGradeEditor();
+        return;
+      }
+      const resetBtn = e.target.closest("[data-grade-reset]");
+      if (resetBtn) {
+        const def = GRADE_TABLE_DEFS[resetBtn.dataset.gradeReset];
+        if (!confirm(`รีเซ็ตตาราง "${def.title}" กลับเป็นค่ามาตรฐาน — รายการที่เพิ่ม/แก้เองไว้จะหายทั้งหมด ยืนยันหรือไม่?`)) return;
+        def.save(def.seed());
+        renderGradeEditor();
+        toast(`รีเซ็ต ${def.title} เป็นค่ามาตรฐานแล้ว`);
+        return;
+      }
+      const delBtn = e.target.closest("[data-grade-del]");
+      if (delBtn) {
+        const [key, idxStr] = delBtn.dataset.gradeDel.split(":");
+        if (!confirm("ลบเกรดนี้ออกจากรายการ?")) return;
+        const def = GRADE_TABLE_DEFS[key];
+        const list = def.get().slice();
+        list.splice(Number(idxStr), 1);
+        def.save(list);
+        renderGradeEditor();
+      }
+    });
+    root.addEventListener("input", (e) => {
+      const rowEl = e.target.closest("[data-grade-row]");
+      const tableEl = e.target.closest("[data-grade-table]");
+      if (!rowEl || !tableEl) return;
+      const def = GRADE_TABLE_DEFS[tableEl.dataset.gradeTable];
+      const list = def.get();
+      const row = list[Number(rowEl.dataset.gradeRow)];
+      if (!row) return;
+      const name = e.target.name;
+      if (!name) return;
+      if (e.target.type === "checkbox") row[name] = e.target.checked;
+      else if (["grade", "method", "maxColor", "stitchDiff", "size", "note"].includes(name)) row[name] = e.target.value;
+      else if (name === "shearPct") row[name] = e.target.value === "" ? null : Number(e.target.value);
+      else row[name] = e.target.value === "" ? "" : Number(e.target.value);
+      def.save(list); // เขียน localStorage + sync ไป window.PlanningEngine ทันที (ไม่ re-render เพื่อไม่ให้ cursor กระโดด)
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { const r = document.getElementById("pwGradeEditor"); if (r && !r.hidden) closeGradeEditor(); } });
+    return root;
+  }
+  function renderGradeEditor() {
+    const root = ensureGradeEditorRoot();
+    root.querySelector(".pw-print-scroll").innerHTML = `
+      <p class="pw-spec-help muted">ตารางเกรดเหล่านี้ใช้จับคู่ "% พื้นที่มีลวดลาย" ของงานกับเกรดโดยอัตโนมัติ (เรียงจาก % ลายน้อยไปมาก แล้วใช้เกรดแรกที่ % ลายของงานนี้ไม่เกิน % ลายของเกรดนั้น) — แก้ค่าที่นี่มีผลกับงานที่ยังให้ระบบเลือกเกรดอัตโนมัติทันที ส่วนงานที่กด "ปรับเกรดเอง" ล็อกเกรดไว้แล้วจะไม่ถูกกระทบ</p>
+      ${gradeTableSectionHtml("weave")}
+      ${gradeTableSectionHtml("punch")}
+      ${gradeTableSectionHtml("finish")}
+    `;
+    root.hidden = false;
+  }
+  function closeGradeEditor() {
+    const root = document.getElementById("pwGradeEditor");
+    if (root) root.hidden = true;
+    renderForm();
+  }
+
   // แผง "ประเมินจากรูปแบบ" (เบื้องต้น) — ดูรูปดีไซน์ที่อัปโหลดไว้แล้ว วิเคราะห์สีเด่น/สัดส่วนพื้นที่ลาย ด้วยสูตรของเราเอง
   function photoAnalysisPanelHtml(p) {
     const photo = window.DesignPhotoStore && typeof window.DesignPhotoStore.getDesignPhoto === "function" ? window.DesignPhotoStore.getDesignPhoto(p.designId) : "";
@@ -869,6 +1176,7 @@
     });
     const cost = laborCost(num(p.totalAreaSqm), weaveGrade);
     const info = designs.find((d) => d.id === p.designId) || {};
+    const moSizes = moLineSizesRef(p.designId);
     const pctSum = p.zones.reduce((t, z) => t + (z.byArea ? (num(p.totalAreaSqm) ? num(z.area) / num(p.totalAreaSqm) * 100 : 0) : num(z.pct)), 0);
     const dyeSeg = sched.segs[1];
     const weaveSeg = sched.segs[2];
@@ -883,13 +1191,17 @@
 
     return `
     <section class="department-panel pw-card">
-      <div class="panel-heading"><div><strong>1) ข้อมูลงาน + สเปคการทอ</strong><small>ดึงจาก M/O ที่ฝ่ายขายเปิด · กรอก % ลาย แล้วระบบแนะนำเกรดทอ/ตอกลาย/ตกแต่งให้อัตโนมัติ (AI ช่วยเลือกให้ ปรับเองได้)</small></div></div>
+      <div class="panel-heading"><div><strong>1) ข้อมูลงาน + สเปคการทอ</strong><small>ดึงจาก M/O ที่ฝ่ายขายเปิด · กรอก % ลาย แล้วระบบแนะนำเกรดทอ/ตอกลาย/ตกแต่งให้อัตโนมัติ (AI ช่วยเลือกให้ ปรับเองได้)</small></div><span class="pw-heading-actions"><button type="button" class="action-button" data-open-spec-editor>จัดการสเปกคุณภาพไหม/การทอ</button><button type="button" class="action-button" data-open-grade-editor>จัดการตารางเกรดทอ/ตอกลาย/ตกแต่ง</button></span></div>
       <div class="pw-body">
         <div class="pw-row">
           ${res("Design", esc(p.designId))}${res("M/O", esc(p.moNo || "-"))}${res("โปรเจกต์", esc(info.project || "-"))}${res("ลูกค้า", esc(info.customer || "-"))}
           ${field("พื้นที่รวม (ตร.ม.)", inp("totalAreaSqm", p.totalAreaSqm, 'class="pw-num"'))}
           ${field("% พื้นที่มีลวดลาย (% ลาย)", inp("patternPct", p.patternPct, 'class="pw-num"'))}
         </div>
+        ${moSizes.length ? `<div class="pw-size-ref">
+          <small>ขนาดจาก M/O ที่ฝ่ายขายเปิด (อ้างอิง — เผื่อบางบรรทัดไม่ได้กรอก ตร.ม. ไว้ ยอด "พื้นที่รวม" ด้านบนอาจไม่ครบ ตรวจสอบ/รวมเองจากรายการนี้ได้)</small>
+          <div class="pw-size-ref-list">${moSizes.map((r) => `<span class="pw-size-ref-item">${esc(r.label)} · ${fmt(r.pcs, 0)} ชิ้น${r.sqm ? ` · ${fmt(r.sqm)} ตร.ม.` : ` · <em>(ไม่ได้กรอก ตร.ม.)</em>`}</span>`).join("")}</div>
+        </div>` : ""}
         ${photoAnalysisPanelHtml(p)}
         ${showGradeEdit ? `<div class="pw-row">
           ${field("เกรดทอ (เว้นว่าง = อัตโนมัติ)", `<select name="weaveGradeOverride"><option value="">อัตโนมัติ</option>${WEAVE_GRADES.map((g) => `<option value="${g.grade}" ${p.weaveGradeOverride === g.grade ? "selected" : ""}>${g.grade}</option>`).join("")}</select>`)}
@@ -1125,6 +1437,10 @@
         openDyePrint(state.plan, items);
         return;
       }
+      const openSpec = e.target.closest("[data-open-spec-editor]");
+      if (openSpec) { renderSpecEditor(); return; }
+      const openGrade = e.target.closest("[data-open-grade-editor]");
+      if (openGrade) { renderGradeEditor(); return; }
       const addZone = e.target.closest("[data-add-zone]");
       if (addZone) {
         const prev = state.plan.zones[state.plan.zones.length - 1] || null;

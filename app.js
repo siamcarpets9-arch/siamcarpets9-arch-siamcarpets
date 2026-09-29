@@ -1050,7 +1050,6 @@ function setView(view){
   if(view==="overview"&&typeof renderOverview==="function") renderOverview();
   if(view==="design") renderDesign();
   if(view==="cost"&&typeof renderCost==="function") renderCost();
-  if(view==="sales") renderSales();
   if(view==="salesreport"&&typeof renderSalesReport==="function") renderSalesReport();
   if(view==="shipping"&&typeof renderShipping==="function") renderShipping();
   if(view==="calc"&&typeof renderCalc==="function") renderCalc();
@@ -1073,7 +1072,9 @@ function summaryCards(target,cards){
 
 function renderDesign(){
   const query=$("#designSearch").value.trim().toLowerCase();
-  const rows=designs.filter((row)=>!query||`${row.id} ${row.project} ${row.customer}`.toLowerCase().includes(query));
+  // ตารางนี้ไว้ใช้ติดตาม "งานที่กำลังทำ" ของแผนกดีไซน์เท่านั้น — พออนุมัติแบบแล้ว (หรือเปิด Job ไปแล้ว) ถือว่างานฝั่งดีไซน์จบแล้ว
+  // ย้ายไปอยู่ในความรับผิดชอบของฝ่ายขาย/วางแผนแทน จึงไม่ต้องค้างอยู่ในตารางนี้อีก (การ์ดสรุปด้านบนยังนับรวมทั้งหมดไว้เป็นสถิติ ไม่ได้กรองตาม)
+  const rows=designs.filter((row)=>row.status!=="APPROVED"&&row.job!=="OPENED"&&(!query||`${row.id} ${row.project} ${row.customer}`.toLowerCase().includes(query)));
   summaryCards("#designSummary",[
     ["คำขอทั้งหมด",designs.length,"Design requests"],
     ["กำลังจัดทำ",designs.filter(x=>["DRAFT","IN REVIEW"].includes(x.status)).length,"Draft และ Review"],
@@ -1170,6 +1171,9 @@ function deleteDesign(id){
 }
 
 function renderSales(){
+  // หน้า "ตรวจแบบและเปิดงานขาย" ถูกเอาออกจากเมนูแล้ว (เปิด Job ตรงจากหน้า "รายงานขาย" แทน) — ฟังก์ชันนี้ยังมีคนเรียกอยู่
+  // (เช่น finishOpenJob หลังเปิด Job ใหม่) แต่ไม่มี DOM ของหน้านี้แล้ว จึงข้ามการ render ไปเงียบ ๆ แทนที่จะโยน error
+  if(!$("#salesTable")) return;
   const query=$("#salesSearch").value.trim().toLowerCase();
   const rows=designs.filter((row)=>!query||`${row.id} ${row.project} ${row.customer}`.toLowerCase().includes(query));
   const approved=designs.filter(x=>x.status==="APPROVED").length;
@@ -1267,8 +1271,6 @@ function renderPlanningYarnRequests(){
 
 $$(".nav-link[data-view]").forEach((button)=>button.addEventListener("click",()=>setView(button.dataset.view)));
 $("#designSearch").addEventListener("input",renderDesign);
-$("#salesSearch").addEventListener("input",renderSales);
-$("#refreshSalesButton").addEventListener("click",renderSales);
 $("#addDesignButton").addEventListener("click",()=>{$("#designFormPanel").hidden=false;$("#designFormPanel").scrollIntoView({behavior:"smooth",block:"center"});});
 $("#closeDesignForm").addEventListener("click",()=>$("#designFormPanel").hidden=true);
 $("#designForm").addEventListener("submit",(event)=>{

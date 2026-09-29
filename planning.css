@@ -18,6 +18,12 @@
 
 .pr{padding:8px 10px;background:#f7faf9;border:1px solid var(--line);min-width:120px}
 .pr small,.pr strong,.pr span{display:block}
+
+.pw-size-ref{margin-bottom:8px;padding:8px 10px;background:#f7faf9;border:1px dashed var(--line)}
+.pw-size-ref>small{display:block;color:var(--muted);font-size:9px;font-weight:900;margin-bottom:6px}
+.pw-size-ref-list{display:flex;flex-wrap:wrap;gap:6px}
+.pw-size-ref-item{padding:4px 8px;background:#fff;border:1px solid var(--line);font-size:10px;color:var(--ink)}
+.pw-size-ref-item em{color:var(--red);font-style:normal}
 .pr small{color:var(--muted);font-size:9px}
 .pr strong{margin:3px 0 1px;font-size:13px}
 .pr span{color:var(--muted);font-size:9px}
@@ -205,6 +211,32 @@
 .pw-print-table td{padding:6px;border:1px solid #d6dedd;font-size:10.5px}
 .pw-print-sign{display:flex;justify-content:space-between;margin-top:26px;font-size:10.5px}
 .pw-print-sign div{width:45%;text-align:center;border-top:1px solid #111;padding-top:6px}
+
+/* ============ จัดการสเปกคุณภาพไหม/การทอ (overlay เต็มจอ — ใช้โครง/สีเดียวกับ #pwPrint) ============ */
+#pwSpecEditor{position:fixed;inset:0;z-index:100;background:#3b4a4d;display:flex;flex-direction:column}
+#pwSpecEditor[hidden]{display:none!important}
+.pw-spec-help{color:#fff;font-size:10.5px;margin:0 0 12px;max-width:820px}
+.pw-spec-table{width:100%;border-collapse:collapse;background:#fff;font-size:11px}
+.pw-spec-table th{background:#16363a;color:#fff;padding:6px;text-align:left;font-size:10px;white-space:nowrap}
+.pw-spec-table td{padding:4px 6px;border:1px solid #d6dedd}
+.pw-spec-table input,.pw-spec-table select{width:100%;box-sizing:border-box;font:inherit;font-size:11px;padding:4px 5px;border:1px solid var(--line,#ccc)}
+.pw-spec-table input.tiny{width:60px}
+.pw-spec-table .pw-spec-label{min-width:130px}
+.pw-spec-table .pw-spec-na{text-align:center;color:#9aa}
+.pw-spec-group td{background:#eef3f2;color:#16363a;font-size:11px;padding:8px 6px}
+
+.pw-heading-actions{display:flex;gap:6px;flex-wrap:wrap}
+
+/* ============ จัดการตารางเกรดทอ/ตอกลาย/ตกแต่ง (overlay เต็มจอ — ใช้โครงเดียวกับ #pwSpecEditor) ============ */
+#pwGradeEditor{position:fixed;inset:0;z-index:100;background:#3b4a4d;display:flex;flex-direction:column}
+#pwGradeEditor[hidden]{display:none!important}
+.pw-grade-section{margin-bottom:22px}
+.pw-grade-section-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.pw-grade-section-head strong{color:#fff;font-size:12px;margin-right:4px}
+.pw-grade-section-head button{border:1px solid #ffffff55;background:transparent;color:#fff;padding:6px 10px;font:inherit;font-size:10px;font-weight:900;cursor:pointer}
+.pw-grade-section-head button:hover{background:#ffffff22}
+.pw-grade-chk{text-align:center}
+.pw-grade-chk input{width:auto}
 
 @media print{
   html,body{background:#fff!important;margin:0!important;padding:0!important;height:auto!important;overflow:visible!important}

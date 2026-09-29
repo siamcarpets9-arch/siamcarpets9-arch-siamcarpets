@@ -873,6 +873,11 @@
     $c("#tripFormPanel").scrollIntoView({ behavior: "smooth", block: "center" });
   }
   function onClick(event) {
+    if (handleExtraCostClick(event, renderMoRollup)) return;
+    const moExpand = event.target.closest("[data-mo-expand]");
+    if (moExpand) { if (typeof FinishingEngine !== "undefined") FinishingEngine.toggleMoExpand(moExpand.dataset.moExpand); renderMoRollup(); return; }
+    const moOvrReset = event.target.closest("[data-mo-ovr-reset]");
+    if (moOvrReset) { if (typeof FinishingEngine !== "undefined") FinishingEngine.saveMoCostOverride(moOvrReset.dataset.moId, moOvrReset.dataset.moOvrReset, null); renderMoRollup(); return; }
     const el = event.target.closest("[data-act]");
     if (!el) return;
     const act = el.dataset.act;
@@ -955,6 +960,13 @@
   }
   function onInput(event) {
     const t = event.target;
+    if (handleExtraCostFieldChange(event)) { renderMoRollup(); return; }
+    const moOvr = t.closest("[data-mo-ovr]");
+    if (moOvr && typeof FinishingEngine !== "undefined") {
+      FinishingEngine.saveMoCostOverride(moOvr.dataset.moId, moOvr.dataset.moOvr, moOvr.value);
+      FinishingEngine.patchMoRollupRow(moOvr.closest("[data-mo-row]"), moOvr.dataset.moOvr);
+      return;
+    }
     if (t.id === "costSearch") { ui.search = t.value; renderProjectTable(); return; }
     if (t.closest("#tripForm")) previewTrip();
     const matRow = t.closest("[data-mat-row]");

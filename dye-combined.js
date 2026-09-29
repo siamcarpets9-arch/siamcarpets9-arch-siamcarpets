@@ -79,7 +79,7 @@
     return {
       id: uid("dc"), colorCode: colorCode || "", method: method || "CtoC", methodOther: methodOther || "", matching: matching || "",
       items: [], // [{designId, potKey}]
-      source: "inhouse", vendor: "", lot: "",
+      source: "inhouse", vendor: "", lot: "", yarnType: "", qualityNote: "",
       rewind: false, twist: false, ply: false,
       buyYarn: false, yarnPricePerKg: 0, serviceFeePerKg: 0,
       special: false, surchargePct: 0,
@@ -214,6 +214,9 @@
     const yarnCode = (chosen[0] && chosen[0].pot.zones[0] && chosen[0].pot.zones[0].yarnCode) || "";
     const price = CE() && CE().getMaterialPrice ? CE().getMaterialPrice(yarnCode) : null;
     if (price != null) c.yarnPricePerKg = price;
+    // ดึง "ชนิดไหม/คุณภาพ" ที่เคยคีย์ไว้ในใบสั่งย้อมเดี่ยวของหม้อแรกที่เลือกมาตั้งต้น (คีย์ทับเองได้เสมอ)
+    c.yarnType = (chosen[0] && chosen[0].order && chosen[0].order.yarnType) || yarnCode;
+    c.qualityNote = (chosen[0] && chosen[0].order && chosen[0].order.qualityNote) || "";
     const today = new Date();
     c.issueDate = today.toISOString().slice(0, 10);
     const list = loadCombined();
@@ -310,7 +313,9 @@
         <label class="pf">แหล่งย้อม<select name="source">${[["inhouse", "ย้อมภายในบริษัท"], ["outsource", "จ้างย้อมบริษัทอื่น"]].map(([v, t]) => `<option value="${v}" ${c.source === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         ${overCap ? `<span class="pw-dye-warn">⚠ รวม ${fmt(netKg, 3)} กก. เกินเกณฑ์ย้อมในบริษัท (${fmt(cap, 1)} กก.) — ควรสลับเป็น "จ้างย้อมบริษัทอื่น"</span>` : ""}
         ${isOut ? field("ชื่อผู้รับจ้างย้อม", inp("vendor", c.vendor, 'inputmode="text"')) : ""}
+        ${field("ชนิดไหม", inp("yarnType", c.yarnType, 'inputmode="text" placeholder="เช่น WOOL AMW"'))}
         ${field("Yarn Lot", inp("lot", c.lot, 'inputmode="text"'))}
+        ${field("คุณภาพ", inp("qualityNote", c.qualityNote, 'inputmode="text" placeholder="เช่น HWO 450 C,L"'))}
         <label class="pf">วิธีย้อม<select name="method">${(PE().DYE_METHODS || []).map((m) => `<option value="${m.value}" ${c.method === m.value ? "selected" : ""}>${m.label}</option>`).join("")}</select></label>
         ${c.method === "other" ? field("ระบุวิธีย้อม", inp("methodOther", c.methodOther, 'inputmode="text"')) : ""}
         <label class="pf" title="ล็อกไว้ตอนรวมเป็นใบสั่งย้อมเดียวกัน (สีเดียวกันแต่เทียบสีคนละแบบจะไม่ถูกจัดกลุ่มรวมกันตั้งแต่แรก)">เทียบสี/Matching<select name="matching">${(PE().MATCHING_OPTS || []).filter((m) => m.value !== "").map((m) => `<option value="${m.value}" ${c.matching === m.value ? "selected" : ""}>${m.label}</option>`).join("")}</select></label>
@@ -363,6 +368,8 @@
         <div><b>เทียบสี/Matching:</b> ${esc(matchLabel)}</div>
         <div><b>น้ำหนักไหมรวม:</b> ${fmt(netKg, 3)} กก.</div>
         <div><b>แหล่งย้อม:</b> ${isOut ? "จ้างย้อมบริษัทอื่น" : "ย้อมภายในบริษัท"}${isOut && c.vendor ? " — " + esc(c.vendor) : ""}</div>
+        <div><b>ชนิดไหม:</b> ${esc(c.yarnType || "-")}</div>
+        <div><b>คุณภาพ:</b> ${esc(c.qualityNote || "-")}</div>
         <div><b>Yarn Lot:</b> ${esc(c.lot || "-")}</div>
         <div><b>วันที่เปิดใบสั่ง:</b> ${esc(c.issueDate || "-")}</div>
         <div><b>วันที่ต้องการไหม:</b> ${esc(c.needDate || "-")}</div>

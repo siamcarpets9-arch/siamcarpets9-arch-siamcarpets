@@ -185,7 +185,7 @@
   }
   function readyDesignIds() { return [...new Set(readyFinishPieces().map((r) => r.designId))]; }
 
-  const state = { tab: "glue", designId: null, lineIdx: null };
+  const state = { tab: "glue", designId: null, lineIdx: null, moExpanded: new Set() };
 
   function field(label, inner) { return `<label class="pf">${label}${inner}</label>`; }
   function res(label, value, cls = "") { return `<div class="pr ${cls}"><small>${label}</small><strong>${value}</strong></div>`; }
@@ -355,25 +355,78 @@
   }
 
   /* ---------------- Tab 3: ต้นทุนต่อ M/O ---------------- */
+  // ค่าที่คีย์แก้ไขทับค่าที่คำนวณอัตโนมัติในตารางสรุปต้นทุนต่อ M/O — ต่อ designId ต่อหมวด (ไม่มี field = ยังใช้ค่าอัตโนมัติ)
+  const KEY_MO_COST_OVR = "siam-mo-cost-overrides";
+  function loadCostOverrides(designId) { const all = readJson(KEY_MO_COST_OVR, {}); return (all && all[designId]) || {}; }
+  function saveMoCostOverride(designId, field, rawValue) {
+    const all = readJson(KEY_MO_COST_OVR, {});
+    const cur = { ...(all[designId] || {}) };
+    if (rawValue === "" || rawValue == null) delete cur[field]; else cur[field] = num(rawValue);
+    if (Object.keys(cur).length) all[designId] = cur; else delete all[designId];
+    writeJson(KEY_MO_COST_OVR, all);
+  }
+  // แก้ยอด "รวมต้นทุน"/"ต้นทุน/ตร.ม." ของแถวเดียวโดยตรงจากช่องคีย์ทั้ง 5 ช่อง — ไม่ re-render ทั้งตาราง กัน cursor กระโดดขณะพิมพ์
+  // field (ถ้าระบุ) คือช่องที่เพิ่งแก้ไข ใช้เพิ่ม/เอาปุ่ม "↺ กลับค่าอัตโนมัติ" ของช่องนั้นโดยไม่ re-render ทั้งแถวเช่นกัน
+  const MO_OVR_AUTO_KEY = { designCost: "designCostAuto", dyeCost: "dyeCostAuto", labor: "laborAuto", meshGlue: "meshGlueAuto", transport: "transportAuto" };
+  function patchMoRollupRow(rowEl, field) {
+    if (!rowEl) return;
+    const v = (f) => { const el = rowEl.querySelector(`[data-mo-ovr="${f}"]`); return el ? num(el.value) : 0; };
+    const total = v("designCost") + v("dyeCost") + v("labor") + v("meshGlue") + v("transport") + num(rowEl.dataset.moExtra);
+    const sqm = num(rowEl.dataset.moSqm);
+    const totalCell = rowEl.querySelector("[data-mo-total]");
+    const perSqmCell = rowEl.querySelector("[data-mo-persqm]");
+    if (totalCell) totalCell.innerHTML = `<strong>${fmt(total, 2)}</strong>`;
+    if (perSqmCell) perSqmCell.textContent = fmt(sqm > 0 ? total / sqm : 0, 2);
+    if (field) {
+      const designId = rowEl.getAttribute("data-mo-row");
+      const input = rowEl.querySelector(`[data-mo-ovr="${field}"]`);
+      const wrap = input ? input.closest(".pw-mo-ovr-cell") : null;
+      if (wrap) {
+        const hasOvr = loadCostOverrides(designId)[field] != null;
+        let btn = wrap.querySelector("[data-mo-ovr-reset]");
+        if (hasOvr && !btn) {
+          const c = costRollupFor(designId);
+          const autoVal = c ? num(c[MO_OVR_AUTO_KEY[field]]) : 0;
+          btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "text-button";
+          btn.setAttribute("data-mo-ovr-reset", field);
+          btn.setAttribute("data-mo-id", designId);
+          btn.title = `กลับไปใช้ค่าอัตโนมัติ (${fmt(autoVal, 2)})`;
+          btn.textContent = "↺";
+          wrap.appendChild(btn);
+        } else if (!hasOvr && btn) {
+          btn.remove();
+        }
+      }
+    }
+  }
+  function toggleMoExpand(designId) { if (state.moExpanded.has(designId)) state.moExpanded.delete(designId); else state.moExpanded.add(designId); }
+  function isMoExpanded(designId) { return state.moExpanded.has(designId); }
+  const numEdit = (v) => String(Math.round((num(v)) * 100) / 100);
+
   function costRollupFor(designId) {
     const plan = WF().planFor(designId);
-    if (!plan) return null;
     const doc = WF().moDocOf(designId);
-    const dye = WF().dyePlanOf(plan);
-    let dyeCost = 0, dyeMissing = 0;
-    dye.pots.forEach((pot) => {
-      const order = plan.dyeOrders && plan.dyeOrders[pot.key];
-      if (order) dyeCost += PE().dyeOrderCost(order, pot.netKg).total;
-      else dyeMissing++;
-    });
-    const gradeStr = WF().suggestedGradeFor(plan);
-    const gradeObj = (PE().WEAVE_GRADES || []).find((g) => g.grade === (plan.weaveGradeOverride || gradeStr));
-    const labor = PE().laborCost(num(plan.totalAreaSqm), gradeObj);
-    // ถ้าส่งจ้างทอภายนอก ใช้ค่าใช้จ่ายจ้างทอจริงแทนค่าแรงทอในบริษัท (ค่าแต่ง/ทากาวยังคงคำนวณตามสูตรเดิมเสมอ)
-    const isWeaveOutsourced = Boolean(plan.weaveOutsource && plan.weaveOutsource.enabled);
-    const weaveOutCost = isWeaveOutsourced ? PE().weaveOutsourceCost(plan.weaveOutsource, plan.totalAreaSqm, dye.totalNetKg).total : 0;
+    if (!plan && !doc) return null; // ไม่มีทั้งใบวางแผนงานและเอกสาร M/O ในระบบเลย ไม่มีอะไรจะโชว์จริง ๆ
+    let dyeCost = 0, dyeMissing = 0, labor = { weaveWage: 0, finishWage: 0 }, isWeaveOutsourced = false, weaveOutCost = 0, sqm = 0;
+    if (plan) {
+      const dye = WF().dyePlanOf(plan);
+      dye.pots.forEach((pot) => {
+        const order = plan.dyeOrders && plan.dyeOrders[pot.key];
+        if (order) dyeCost += PE().dyeOrderCost(order, pot.netKg).total;
+        else dyeMissing++;
+      });
+      const gradeStr = WF().suggestedGradeFor(plan);
+      const gradeObj = (PE().WEAVE_GRADES || []).find((g) => g.grade === (plan.weaveGradeOverride || gradeStr));
+      labor = PE().laborCost(num(plan.totalAreaSqm), gradeObj);
+      // ถ้าส่งจ้างทอภายนอก ใช้ค่าใช้จ่ายจ้างทอจริงแทนค่าแรงทอในบริษัท (ค่าแต่ง/ทากาวยังคงคำนวณตามสูตรเดิมเสมอ)
+      isWeaveOutsourced = Boolean(plan.weaveOutsource && plan.weaveOutsource.enabled);
+      weaveOutCost = isWeaveOutsourced ? PE().weaveOutsourceCost(plan.weaveOutsource, plan.totalAreaSqm, dye.totalNetKg).total : 0;
+      sqm = num(plan.totalAreaSqm);
+    }
     const weaveCostEffective = isWeaveOutsourced ? weaveOutCost : labor.weaveWage;
-    const laborEffectiveTotal = weaveCostEffective + labor.finishWage;
+    const laborAuto = weaveCostEffective + labor.finishWage;
 
     const dfin = loadFinishAll()[designId] || { pieces: {} };
     let meshCost = 0, glueCost = 0, transportCost = 0, extraStaffCost = 0, extraCostTotal = 0;
@@ -385,54 +438,79 @@
       extraStaffCost += num(rec.transport.extraStaffCost);
       (rec.extraCosts || []).forEach((ec) => { extraCostTotal += num(ec.amount); extraLines.push(ec); });
     });
-    // ค่าใช้จ่ายอื่นต่อ M/O ที่แผนกต่าง ๆ เพิ่มเองได้ (วางแผน/ย้อม/ทอ/ปั๊ม ฯลฯ — เก็บกลางใน CostEngine แยกจาก extraCosts รายชิ้นด้านบน)
+    // ค่าใช้จ่ายอื่นต่อ M/O ที่แผนกต่าง ๆ เพิ่มเองได้ (วางแผน/ย้อม/ทอ/ปั๊ม ฯลฯ — เก็บกลางใน CostEngine แยกจาก extraCosts รายชิ้นด้านบน) แก้ไข/เพิ่มได้ตรงนี้เลยผ่านปุ่ม "แก้ไข" ในคอลัมน์ "อื่น ๆ"
     const sharedExtraCosts = (CE() && CE().loadExtraCosts) ? CE().loadExtraCosts(designId) : [];
     sharedExtraCosts.forEach((ec) => { extraCostTotal += num(ec.amount); extraLines.push(ec); });
     const isDomestic = doc && doc.market === "DOMESTIC";
     const dcost = designCostFor(designId);
-    const designCost = dcost ? dcost.cost : 0;
-    const total = designCost + dyeCost + laborEffectiveTotal + meshCost + glueCost + (isDomestic ? transportCost + extraStaffCost : 0) + extraCostTotal;
-    const sqm = num(plan.totalAreaSqm);
+    const designCostAuto = dcost ? dcost.cost : 0;
+    const meshGlueAuto = meshCost + glueCost;
+    const transportAuto = isDomestic ? transportCost + extraStaffCost : 0;
+
+    // คีย์แก้ไขเพิ่มเติมได้ทุกรายการ (ทุกหมวดต้นทุน) — มี override ไว้ใช้ค่าที่คีย์แทนค่าอัตโนมัติทันที กด ↺ เพื่อกลับไปใช้ค่าอัตโนมัติได้เสมอ
+    const ovr = loadCostOverrides(designId);
+    const designCost = ovr.designCost != null ? ovr.designCost : designCostAuto;
+    const dyeCostFinal = ovr.dyeCost != null ? ovr.dyeCost : dyeCost;
+    const laborEffectiveTotal = ovr.labor != null ? ovr.labor : laborAuto;
+    const meshGlue = ovr.meshGlue != null ? ovr.meshGlue : meshGlueAuto;
+    const transportFinal = ovr.transport != null ? ovr.transport : transportAuto;
+    const total = designCost + dyeCostFinal + laborEffectiveTotal + meshGlue + transportFinal + extraCostTotal;
+
+    const row = typeof designs !== "undefined" ? designs.find((d) => d.id === designId) : null;
+    const st = row && typeof OverviewEngine !== "undefined" && OverviewEngine.statusOf ? OverviewEngine.statusOf(row) : null;
+    const shipped = Boolean(st && st.state === "done");
     return {
-      designId, plan, doc, designCost, designer: dcost ? dcost.designer : "", dyeCost, dyeMissing, labor, meshCost, glueCost,
-      isWeaveOutsourced, weaveOutCost, laborEffectiveTotal,
-      transportCost: isDomestic ? transportCost : 0, extraStaffCost: isDomestic ? extraStaffCost : 0,
+      designId, plan, doc, hasPlan: Boolean(plan),
+      designCost, designCostAuto, designer: dcost ? dcost.designer : "",
+      dyeCost: dyeCostFinal, dyeCostAuto: dyeCost, dyeMissing,
+      laborEffectiveTotal, laborAuto, isWeaveOutsourced, weaveOutCost,
+      meshGlue, meshGlueAuto,
+      transportFinal, transportAuto, transportCost: isDomestic ? transportCost : 0, extraStaffCost: isDomestic ? extraStaffCost : 0,
       extraCostTotal, extraLines, total, sqm, costPerSqm: sqm > 0 ? total / sqm : 0,
       isDomestic, market: doc ? doc.market : null,
-      saleAmount: doc ? SalesEngine.docAmount(doc) : null, currency: doc ? doc.currency : null
+      saleAmount: doc ? SalesEngine.docAmount(doc) : null, currency: doc ? doc.currency : null,
+      overrides: ovr, shipped, shipLabel: st ? st.stateLabel : (shipped ? "ส่งแล้ว" : "ยังไม่ส่ง")
     };
   }
 
   function costRollupRowHtml(c) {
-    return `<tr>
-      <td>${esc(c.plan.moNo || c.designId)}</td>
+    const expanded = isMoExpanded(c.designId);
+    const ovrCell = (field, val, autoVal) => `<span class="pw-mo-ovr-cell"><input class="pw-num tiny" data-mo-ovr="${field}" data-mo-id="${esc(c.designId)}" value="${esc(numEdit(val))}">${c.overrides[field] != null ? `<button type="button" class="text-button" data-mo-ovr-reset="${field}" data-mo-id="${esc(c.designId)}" title="กลับไปใช้ค่าอัตโนมัติ (${fmt(autoVal, 2)})">↺</button>` : ""}</span>`;
+    return `<tr data-mo-row="${esc(c.designId)}" data-mo-extra="${c.extraCostTotal}" data-mo-sqm="${c.sqm}">
+      <td>${esc(c.plan ? (c.plan.moNo || c.designId) : (c.doc ? c.doc.no : c.designId))}${!c.hasPlan ? `<br><small class="pw-dye-warn">ยังไม่ได้วางแผน</small>` : ""}</td>
+      <td>${c.shipped ? `<span class="status-tag">${esc(c.shipLabel)}</span>` : `<span class="status-tag review">${esc(c.shipLabel)}</span>`}</td>
       <td>${c.market ? esc(c.market === "DOMESTIC" ? "ในประเทศ" : "ต่างประเทศ") : "-"}</td>
-      <td class="num">${c.designCost ? fmt(c.designCost, 2) : `<span class="muted">-</span>`}${c.designer ? `<br><small>${esc(c.designer)}</small>` : ""}</td>
-      <td class="num">${fmt(c.dyeCost, 2)}${c.dyeMissing ? `<br><small class="pw-dye-warn">${c.dyeMissing} หม้อยังไม่มีใบสั่งย้อม</small>` : ""}</td>
-      <td class="num">${fmt(c.laborEffectiveTotal, 2)}${c.isWeaveOutsourced ? `<br><small class="pw-dye-warn">จ้างทอนอก ${fmt(c.weaveOutCost, 0)}</small>` : ""}</td>
-      <td class="num">${fmt(c.meshCost + c.glueCost, 2)}</td>
-      <td class="num">${fmt(c.transportCost + c.extraStaffCost, 2)}</td>
-      <td class="num">${fmt(c.extraCostTotal, 2)}</td>
-      <td class="num"><strong>${fmt(c.total, 2)}</strong></td>
-      <td class="num">${fmt(c.costPerSqm, 2)}</td>
+      <td class="num">${ovrCell("designCost", c.designCost, c.designCostAuto)}${c.designer ? `<br><small>${esc(c.designer)}</small>` : ""}</td>
+      <td class="num">${ovrCell("dyeCost", c.dyeCost, c.dyeCostAuto)}${c.dyeMissing ? `<br><small class="pw-dye-warn">${c.dyeMissing} หม้อยังไม่มีใบสั่งย้อม</small>` : ""}</td>
+      <td class="num">${ovrCell("labor", c.laborEffectiveTotal, c.laborAuto)}${c.isWeaveOutsourced ? `<br><small class="pw-dye-warn">จ้างทอนอก ${fmt(c.weaveOutCost, 0)}</small>` : ""}</td>
+      <td class="num">${ovrCell("meshGlue", c.meshGlue, c.meshGlueAuto)}</td>
+      <td class="num">${ovrCell("transport", c.transportFinal, c.transportAuto)}</td>
+      <td class="num">${fmt(c.extraCostTotal, 2)}<br><button type="button" class="text-button" data-mo-expand="${esc(c.designId)}">${expanded ? "ซ่อน" : "แก้ไข"}</button></td>
+      <td class="num" data-mo-total><strong>${fmt(c.total, 2)}</strong></td>
+      <td class="num" data-mo-persqm>${fmt(c.costPerSqm, 2)}</td>
       <td class="num">${c.saleAmount != null ? `${fmt(c.saleAmount, 2)} ${esc(c.currency || "")}` : "-"}</td>
-    </tr>`;
+    </tr>${expanded ? `<tr class="pw-mo-extra-row"><td colspan="12">${CE() && CE().extraCostWidgetHtml ? CE().extraCostWidgetHtml(c.designId, "cost") : ""}</td></tr>` : ""}`;
   }
 
-  // รายชื่อ designId ทั้งหมดที่ควรมีในสรุปต้นทุนต่อ M/O (มีจอทอ/ทากาวแล้ว หรือมีใบวางแผนงานที่บันทึกไว้)
+  // รายชื่อ designId ทั้งหมดที่ควรมีในสรุปต้นทุนต่อ M/O — ทุก M/O ในทะเบียนขาย ทั้งที่ส่งแล้วและยังไม่ส่ง
+  // (ไม่จำกัดแค่ที่บันทึกใบวางแผนงานหรือถึงแผนกตกแต่งแล้วเหมือนเดิม เพื่อให้เห็นภาพต้นทุน/ยอดขายของทุก M/O ในที่เดียว)
   function allCostRollups() {
-    const ids = [...new Set([...readyDesignIds(), ...Object.keys(loadFinishAll())])];
+    const finIds = [...new Set([...readyDesignIds(), ...Object.keys(loadFinishAll())])];
     const plans = PE().readJson(PE().KEY_PLANS, {});
-    const allSaved = Object.keys(plans).filter((id) => plans[id].savedAt);
-    return [...new Set([...ids, ...allSaved])].map((id) => costRollupFor(id)).filter(Boolean);
+    const plannedIds = Object.keys(plans).filter((id) => plans[id].savedAt);
+    const allMoIds = (typeof SalesEngine !== "undefined" && SalesEngine.getDocs)
+      ? SalesEngine.getDocs().filter((d) => d.type === "MO" && has(d.designId)).map((d) => d.designId)
+      : [];
+    const ids = [...new Set([...finIds, ...plannedIds, ...allMoIds])];
+    return ids.map((id) => costRollupFor(id)).filter(Boolean);
   }
 
-  // ตารางสรุปต้นทุนต่อ M/O แบบละเอียดทุกแผนก (Design + ย้อม + ทอ/แต่ง + ผ้าตาข่าย/กาว + ขนส่ง + อื่น ๆ)
+  // ตารางสรุปต้นทุนต่อ M/O แบบละเอียดทุกแผนก (Design + ย้อม + ทอ/แต่ง + ผ้าตาข่าย/กาว + ขนส่ง + อื่น ๆ) — ทุกช่องตัวเลขคีย์แก้ไขทับได้โดยตรง
   // เรียกใช้ได้ทั้งจากแท็บนี้เอง และจากหน้า “ต้นทุน M/O” ส่วนกลาง (cost.js)
   function costRollupTableHtml() {
     const list = allCostRollups();
-    return list.length ? `<table class="calc-table"><thead><tr><th>M/O</th><th>ตลาด</th><th class="num">ต้นทุนออกแบบ</th><th class="num">ค่าไหม/ย้อม</th><th class="num">ค่าแรงทอ+แต่ง</th><th class="num">ค่าผ้าตาข่าย+กาว</th><th class="num">ขนส่ง+พนักงานเพิ่ม</th><th class="num">อื่น ๆ</th><th class="num">รวมต้นทุน</th><th class="num">ต้นทุน/ตร.ม.</th><th class="num">ยอดขาย</th></tr></thead><tbody>${list.map(costRollupRowHtml).join("")}</tbody></table>
-    <p style="color:var(--muted);font-size:10px;margin:6px 2px 0">หมายเหตุ: ต้นทุนออกแบบคำนวณจากหน้า “ต้นทุน M/O” (เงินเดือน Designer ÷ ชั่วโมงทำงาน) เฉพาะ M/O ที่ผูกกับงานทำแบบจริงในทะเบียน Design เท่านั้น · ค่าแรงทอ+แต่งใช้สูตรเดียวกับหน้าใบวางแผนงาน (พื้นที่ × ค่าแรงเกรด + พื้นที่ × 400 บาท/ตร.ม. สำหรับแต่ง/ทากาว — สมมติฐานหน่วย ยังไม่ยืนยันกับฝ่ายบัญชี) · ค่าแรงแผนกเจาะลาย/ขยายลาย ยังไม่มีอัตราค่าจ้างยืนยัน จึงไม่รวมในยอดนี้ · คอลัมน์ “อื่น ๆ” รวมทั้งรายการต้นทุนอื่นที่กรอกไว้ในแท็บนี้ และรายการ “ค่าใช้จ่ายอื่นที่เกิดขึ้นกับ M/O นี้” ที่แผนกใดก็ได้ (วางแผน/ย้อม/ทอ/ปั๊ม) เพิ่มไว้ผ่านหน้าของตัวเอง · ค่าไหมในค่าไหม/ย้อมดึงราคาวัตถุดิบปัจจุบันจากหน้า “ต้นทุน” มาเป็นค่าเริ่มต้นให้อัตโนมัติ (แก้ไขเฉพาะออเดอร์ได้เสมอ) · ยอดขายเทียบสกุลเงินตามที่บันทึกในหน้ารายงานขาย (ต่างประเทศเป็น USD ในประเทศเป็น THB — ไม่ได้แปลงอัตราแลกเปลี่ยนให้)</p>` : `<p class="col-empty">ยังไม่มี M/O ที่บันทึกใบวางแผนงาน</p>`;
+    return list.length ? `<table class="calc-table pw-mo-cost-table"><thead><tr><th>M/O</th><th>สถานะ</th><th>ตลาด</th><th class="num">ต้นทุนออกแบบ</th><th class="num">ค่าไหม/ย้อม</th><th class="num">ค่าแรงทอ+แต่ง</th><th class="num">ค่าผ้าตาข่าย+กาว</th><th class="num">ขนส่ง+พนักงานเพิ่ม</th><th class="num">อื่น ๆ</th><th class="num">รวมต้นทุน</th><th class="num">ต้นทุน/ตร.ม.</th><th class="num">ยอดขาย</th></tr></thead><tbody>${list.map(costRollupRowHtml).join("")}</tbody></table>
+    <p style="color:var(--muted);font-size:10px;margin:6px 2px 0">หมายเหตุ: ตารางนี้รวม<strong>ทุก M/O ในทะเบียนขาย ทั้งที่ส่งแล้วและยังไม่ส่ง</strong> ไม่ใช่แค่ M/O ที่บันทึกใบวางแผนงานหรือถึงแผนกตกแต่งแล้วเหมือนเดิม · ช่องตัวเลขทุกคอลัมน์ (ยกเว้นยอดขาย) <strong>คีย์แก้ไขทับค่าที่คำนวณอัตโนมัติได้โดยตรง</strong> พิมพ์แล้วบันทึกทันที กด ↺ ข้าง ๆ ช่องเพื่อกลับไปใช้ค่าอัตโนมัติ · คอลัมน์ “อื่น ๆ” กด “แก้ไข” เพื่อเพิ่ม/แก้/ลบรายการค่าใช้จ่ายอื่นของ M/O นั้นได้ตรงนี้เลย (รายการเดียวกับที่ทุกแผนกเห็นและเพิ่มได้) · ต้นทุนออกแบบคำนวณจากหน้า “ต้นทุน M/O” (เงินเดือน Designer ÷ ชั่วโมงทำงาน) เฉพาะ M/O ที่ผูกกับงานทำแบบจริงในทะเบียน Design เท่านั้น · ค่าแรงทอ+แต่งใช้สูตรเดียวกับหน้าใบวางแผนงาน (พื้นที่ × ค่าแรงเกรด + พื้นที่ × 400 บาท/ตร.ม. สำหรับแต่ง/ทากาว — สมมติฐานหน่วย ยังไม่ยืนยันกับฝ่ายบัญชี) · ค่าแรงแผนกเจาะลาย/ขยายลาย ยังไม่มีอัตราค่าจ้างยืนยัน จึงไม่รวมในยอดอัตโนมัติ (คีย์เพิ่มเองได้ที่ช่อง "ค่าแรงทอ+แต่ง") · ค่าไหมในค่าไหม/ย้อมดึงราคาวัตถุดิบปัจจุบันจากหน้า “ต้นทุน” มาเป็นค่าเริ่มต้นให้อัตโนมัติ (แก้ไขเฉพาะออเดอร์ได้เสมอ) · ยอดขายเทียบสกุลเงินตามที่บันทึกในหน้ารายงานขาย (ต่างประเทศเป็น USD ในประเทศเป็น THB — ไม่ได้แปลงอัตราแลกเปลี่ยนให้)</p>` : `<p class="col-empty">ยังไม่มี M/O ในทะเบียนขาย</p>`;
   }
 
   function costTabHtml() {
@@ -533,6 +611,11 @@
         return;
       }
 
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostClick && CostEngine.handleExtraCostClick(e, renderAll)) return;
+      const moExpand = e.target.closest("[data-mo-expand]");
+      if (moExpand) { toggleMoExpand(moExpand.dataset.moExpand); renderAll(); return; }
+      const moOvrReset = e.target.closest("[data-mo-ovr-reset]");
+      if (moOvrReset) { saveMoCostOverride(moOvrReset.dataset.moId, moOvrReset.dataset.moOvrReset, null); renderAll(); return; }
       const issueMesh = e.target.closest("[data-issue-mesh]");
       if (issueMesh) {
         const dfin = ensureDesignFinish(state.designId);
@@ -680,6 +763,9 @@
     });
 
     root.addEventListener("input", (e) => {
+      if (typeof CostEngine !== "undefined" && CostEngine.handleExtraCostFieldChange && CostEngine.handleExtraCostFieldChange(e)) { renderAll(); return; }
+      const moOvr = e.target.closest("[data-mo-ovr]");
+      if (moOvr) { saveMoCostOverride(moOvr.dataset.moId, moOvr.dataset.moOvr, moOvr.value); patchMoRollupRow(moOvr.closest("[data-mo-row]"), moOvr.dataset.moOvr); return; }
       const glueItemRow = e.target.closest("[data-glueitem]");
       if (glueItemRow) {
         const dfin = ensureDesignFinish(state.designId);
@@ -708,6 +794,10 @@
     });
   }
 
-  window.FinishingEngine = { KEY_FINISH, loadFinishAll, ensureDesignFinish, saveDesignFinish, ensurePieceFinish, areaBeforeGlue, standardGlueKg, actualGlueKg, glueVariancePct, costRollupFor, allCostRollups, costRollupTableHtml, readyFinishPieces };
+  window.FinishingEngine = {
+    KEY_FINISH, loadFinishAll, ensureDesignFinish, saveDesignFinish, ensurePieceFinish, areaBeforeGlue, standardGlueKg, actualGlueKg, glueVariancePct, costRollupFor, allCostRollups, costRollupTableHtml, readyFinishPieces,
+    // สรุปต้นทุนต่อ M/O — คีย์แก้ไขทับค่าอัตโนมัติได้ทุกหมวด + เปิด/ปิดแก้ไขรายการ "อื่น ๆ" ต่อแถว (ใช้ร่วมกันได้ทั้งแท็บนี้เองและหน้า "ต้นทุน M/O" ส่วนกลางใน cost.js)
+    loadMoCostOverrides: loadCostOverrides, saveMoCostOverride, patchMoRollupRow, toggleMoExpand, isMoExpanded
+  };
   window.renderFinishing = renderFinishing;
 })();
