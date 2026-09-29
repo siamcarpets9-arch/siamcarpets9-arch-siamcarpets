@@ -381,11 +381,20 @@
       special: false, surchargePct: 0,
       plyCostPerKg: 0, windCostPerKg: 0, twistCostPerKg: 0, hankCostPerKg: 0, epzPct: 0,
       issueDate: isoDate(offsetToDate(dyeSeg.start)), needDate: isoDate(offsetToDate(dyeSeg.end)),
-      issueDateAuto: true, needDateAuto: true
+      issueDateAuto: true, needDateAuto: true,
+      // รับเข้าจากผู้รับจ้างย้อม (เฉพาะ source = "outsource") — วันที่รับ + จำนวนที่รับจริง (กก.)
+      // ใช้ทั้งคำนวณ "ส่วนต่าง" เทียบกับน้ำหนักตามแผน และเป็นตัวจุดชนวนให้ "เส้นด้ายพร้อม" ติ๊กอัตโนมัติที่หน้าแผนกทอ
+      receivedDate: "", receivedKg: ""
     };
   }
+  // งานจ้างย้อมนอกที่ "รับเข้า" แล้ว (มีทั้งวันที่รับและจำนวนที่รับ) ให้คิดต้นทุนไหม+ค่าจ้างย้อมจากน้ำหนักที่รับจริง
+  // แทนน้ำหนักตามแผน (netKg) — ตรงกับยอดที่ต้องจ่ายโรงย้อมจริง ยังไม่รับเข้า/ย้อมในบริษัทเองใช้น้ำหนักตามแผนตามเดิม
+  function dyeOrderEffectiveKg(order, netKg) {
+    if (order.source === "outsource" && has(order.receivedDate) && has(order.receivedKg) && num(order.receivedKg) > 0) return num(order.receivedKg);
+    return num(netKg);
+  }
   function dyeOrderCost(order, netKg) {
-    netKg = num(netKg);
+    netKg = dyeOrderEffectiveKg(order, netKg);
     const yarnCost = order.buyYarn ? netKg * num(order.yarnPricePerKg) : 0;
     const serviceCost = order.source === "outsource" ? netKg * num(order.serviceFeePerKg) : 0;
     const surcharge = order.special ? (yarnCost + serviceCost) * (num(order.surchargePct) / 100) : 0;
@@ -403,7 +412,7 @@
     WEAVE_GRADES, PUNCH_GRADES, FINISH_GRADES, WAGE_GLUE_FINISH, suggestGrade,
     potKeyOf, potLabelOf, computeZone, computeDyePlan, zoneMixComponents, blankMixRow,
     deptDays, dateToOffset, offsetToDate, fmtThaiDate, computeSchedule, laborCost,
-    DYE_METHODS, isoDate, isoToDate, blankDyeOrder, dyeOrderCost,
+    DYE_METHODS, isoDate, isoToDate, blankDyeOrder, dyeOrderCost, dyeOrderEffectiveKg,
     MATCHING_OPTS, matchingLabel, autoMatchingOfPot, effectiveMatching,
     KEY_DYE_CAP, dyeInhouseCapKg: loadDyeCapKg, setDyeInhouseCapKg: saveDyeCapKg,
     blankWeaveOutsource, weaveOutsourceCost,
@@ -855,6 +864,28 @@
     return p.deptSentDates;
   }
 
+  // จ้างย้อมนอก + "รับเข้า" แล้ว (มีวันที่รับ + จำนวนที่รับ มากกว่า 0) ให้ถือว่าเส้นด้ายของหม้อย้อมนี้พร้อมนำเข้าแผนกทอแล้ว
+  // เขียนตรงเข้า localStorage ของหน้าแผนกทอ (siam-weaving-issues) — ใช้คีย์ที่ WeavingEngine ประกาศไว้ถ้าโหลดแล้ว กันพลาดกรณีลำดับโหลดสลับกัน
+  function markYarnReadyForPot(designId, potKey, ready) {
+    if (!designId || !potKey) return;
+    try {
+      const KEY = (typeof WeavingEngine !== "undefined" && WeavingEngine.KEY_ISSUES) || "siam-weaving-issues";
+      const all = readJson(KEY, {});
+      if (!all[designId]) all[designId] = { pots: {}, lines: {}, canvasReady: false, issuedAt: null, usage: [] };
+      if (!all[designId].pots) all[designId].pots = {};
+      if (!all[designId].pots[potKey]) all[designId].pots[potKey] = { surplusDrawn: 0, yarnReady: false };
+      if (all[designId].pots[potKey].yarnReady !== !!ready) {
+        all[designId].pots[potKey].yarnReady = !!ready;
+        writeJson(KEY, all);
+      }
+    } catch (e) { /* หน้าแผนกทอยังไม่เคยเปิด/localStorage ใช้ไม่ได้ — ไม่กระทบการบันทึกแผนของหน้านี้ */ }
+  }
+  function syncYarnReadyFromReceipt(designId, order, potKey) {
+    if (order.source !== "outsource") return; // ย้อมในบริษัทเองไม่ผ่านขั้นตอน "รับเข้า" นี้ — ใช้ติ๊ก "เส้นด้ายพร้อม" ที่หน้าแผนกทอเองตามเดิม
+    const ready = has(order.receivedDate) && has(order.receivedKg) && num(order.receivedKg) > 0;
+    markYarnReadyForPot(designId, potKey, ready);
+  }
+
   // ผูก "ใบสั่งย้อม" แต่ละหม้อกับหม้อย้อมที่คำนวณสด ๆ ทุกครั้ง — สร้างค่าเริ่มต้นถ้ายังไม่มี และซิงก์วันที่กับ Master Plan ถ้ายังไม่ถูก override เอง
   function syncDyeOrders(p, pots, dyeSeg) {
     const seen = new Set();
@@ -878,8 +909,24 @@
       }
       if (o.issueDateAuto !== false) o.issueDate = isoDate(offsetToDate(dyeSeg.start));
       if (o.needDateAuto !== false) o.needDate = isoDate(offsetToDate(dyeSeg.end));
+      syncYarnReadyFromReceipt(p.designId, o, pot.key);
     });
     return pots.map((pot) => ({ pot, order: p.dyeOrders[pot.key] }));
+  }
+
+  // ส่วน "รับเข้า" ของงานจ้างย้อมนอก — วันที่รับ + จำนวนที่รับจริง (กก.) + ส่วนต่างเทียบกับน้ำหนักตามแผน (pot.netKg)
+  // มีค่าทั้งคู่แล้ว = ระบบถือว่า "รับเข้าแล้ว" (syncYarnReadyFromReceipt ติ๊ก "เส้นด้ายพร้อม" ให้อัตโนมัติที่หน้าแผนกทอ + dyeOrderCost คิดจากน้ำหนักที่รับจริงแทน)
+  function dyeOrderReceiveHtml(order, pot) {
+    const received = has(order.receivedDate) && has(order.receivedKg) && num(order.receivedKg) > 0;
+    const showVariance = has(order.receivedKg) && num(order.receivedKg) > 0;
+    const variance = num(order.receivedKg) - num(pot.netKg);
+    const warn = showVariance && Math.abs(variance) > Math.max(0.5, num(pot.netKg) * 0.05);
+    return `<div class="pw-dye-grid pw-dye-receive">
+      <label class="pf">วันที่รับเข้า (จากผู้รับจ้างย้อม)<input type="date" name="receivedDate" value="${esc(order.receivedDate)}"></label>
+      <label class="pf">จำนวนที่รับจริง (กก.)${inp("receivedKg", order.receivedKg, 'class="pw-num" placeholder="กก. ที่ได้รับกลับมา"')}</label>
+      ${showVariance ? `<span class="pw-dye-variance ${warn ? "warn" : ""}">ส่วนต่าง (รับจริง − สั่งย้อม ${fmt(pot.netKg, 3)} กก.): <strong>${variance >= 0 ? "+" : ""}${fmt(variance, 3)} กก.</strong></span>` : `<small class="muted">กรอกวันที่รับ + จำนวนที่รับจริง เมื่อโรงย้อมส่งไหมกลับมาแล้ว — ระบบจะติ๊ก "เส้นด้ายพร้อม" ให้อัตโนมัติที่หน้าแผนกทอ และคิดต้นทุนจากน้ำหนักที่รับจริงแทนน้ำหนักตามแผน</small>`}
+      ${received ? `<span class="pw-dye-received-ok">✓ รับเข้าแล้ว — นำเข้าแผนกทอแล้ว (ติ๊ก "เส้นด้ายพร้อม" ให้อัตโนมัติ)</span>` : ""}
+    </div>`;
   }
 
   function dyeOrderCardHtml(pot, order, dyeSeg, capKg) {
@@ -930,7 +977,8 @@
         <label class="pf ${needMismatch ? "warn-label" : ""}">วันที่ต้องการไหม<input type="date" name="needDate" value="${esc(order.needDate)}"></label>
         ${issueMismatch || needMismatch ? `<span class="pw-dye-warn">⚠ ไม่ตรงกับ Master Plan (สั่งย้อม ${fmtThaiDate(offsetToDate(dyeSeg.start))} – ${fmtThaiDate(offsetToDate(dyeSeg.end))})</span>` : ""}
       </div>
-      ${isOut ? `<div class="pw-dye-cost">รวมค่าใช้จ่าย: <strong>${fmt(cost.total, 0)} บาท</strong><small> (ไหม ${fmt(cost.yarnCost, 0)} + ค่าจ้างย้อม ${fmt(cost.serviceCost, 0)} + surcharge ${fmt(cost.surcharge, 0)} + กรอ/ทวิส/ควบ ${fmt(cost.windCost + cost.twistCost + cost.plyCost, 0)} + hank ${fmt(cost.hankCost, 0)} + EPZ ${fmt(cost.epzTax, 0)})</small></div>` : `<div class="pw-dye-cost muted">ย้อมภายในบริษัท — ไม่คิดค่าจ้างย้อม/surcharge ภายนอก</div>`}
+      ${isOut ? dyeOrderReceiveHtml(order, pot) : ""}
+      ${isOut ? `<div class="pw-dye-cost">รวมค่าใช้จ่าย: <strong>${fmt(cost.total, 0)} บาท</strong><small> (ไหม ${fmt(cost.yarnCost, 0)} + ค่าจ้างย้อม ${fmt(cost.serviceCost, 0)} + surcharge ${fmt(cost.surcharge, 0)} + กรอ/ทวิส/ควบ ${fmt(cost.windCost + cost.twistCost + cost.plyCost, 0)} + hank ${fmt(cost.hankCost, 0)} + EPZ ${fmt(cost.epzTax, 0)})${dyeOrderEffectiveKg(order, pot.netKg) !== num(pot.netKg) ? ` — คิดจากน้ำหนักที่รับจริง ${fmt(dyeOrderEffectiveKg(order, pot.netKg), 3)} กก.` : ""}</small></div>` : `<div class="pw-dye-cost muted">ย้อมภายในบริษัท — ไม่คิดค่าจ้างย้อม/surcharge ภายนอก</div>`}
       <div class="pw-row"><button type="button" class="text-button" data-print-dye="${esc(pot.key)}">🖨 พิมพ์ใบสั่งย้อม (PDF)</button></div>
     </div>`;
   }
