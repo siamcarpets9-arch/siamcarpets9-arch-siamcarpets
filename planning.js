@@ -231,7 +231,10 @@
   }
 
   function computeZone(zone, totalAreaSqm) {
-    const areaSqm = zone.byArea ? num(zone.area) : totalAreaSqm * (num(zone.pct) / 100);
+    // ถ้าโซนนี้ผูกกับ "ชิ้น" ไหนไว้ (ระบบแยกพื้นที่เป็นรายชิ้น) ให้ใช้พื้นที่ของชิ้นนั้นเป็นฐานคำนวณ % แทนพื้นที่รวมทั้ง M/O
+    // (pieceSqm ถูก sync ให้ตรงกับพื้นที่ชิ้นล่าสุดเสมอจาก syncPiecesTotal — ไม่ต้องส่ง pieces array เข้ามาที่นี่)
+    const areaBasis = (zone.pieceId && has(zone.pieceSqm)) ? num(zone.pieceSqm) : totalAreaSqm;
+    const areaSqm = zone.byArea ? num(zone.area) : areaBasis * (num(zone.pct) / 100);
     const structure = (zone.weaveType === "loop") ? "loop" : "cut"; // tipshear ใช้สูตร cut (ก่อนเจียร์) ตามกฎที่ยืนยัน
     const spec = { structure, S: zone.S, R: zone.R, FPH: zone.FPH, TPH: zone.TPH, PH: zone.FPH, Tex: zone.Tex, N: zone.N };
     const weightPerSqmKg = (has(zone.S) && has(zone.Tex) && has(zone.N) && (structure === "loop" ? has(zone.FPH) : (has(zone.FPH) && has(zone.TPH)))) ? dyeWeightPerSqmKg(spec) : 0;
@@ -455,7 +458,9 @@
     const yt = YARN_TYPES_DEFAULT.find((y) => y.code === yarnCode) || YARN_TYPES_DEFAULT[0];
     // refColor = สีตัวอย่างที่ตรวจพบจากรูปแบบ (ถ้ามาจากปุ่ม "ประเมินจากรูปแบบ") ใช้แค่โชว์เป็นสวอตช์อ้างอิงให้ผู้วางแผน
     // เทียบหารหัสไหมจริงเอง ไม่ได้ใช้คำนวณอะไร (colorCode ยังว่างต้องกรอกรหัสไหมจริงเองเสมอ)
-    const zone = { id: uid("z"), name: "", colorCode: "", refColor: refColor || "", weaveType, byArea: false, pct: 0, area: 0, presetId: "", yarnCode: yt.code, S: 28, R: 12, FPH: 9, TPH: 11, N: 4, Tex: yt.tex, mixEnabled: false, mix: [] };
+    // pieceId/pieceSqm: ถ้าโซนนี้อยู่ในชิ้นไหน (ระบบแยกพื้นที่เป็นรายชิ้น) ใช้พื้นที่ของชิ้นนั้นเป็นฐานคำนวณแทนพื้นที่รวมทั้งหมด
+    // (ตั้งค่าจากผู้เรียกเสมอ ไม่สืบทอดจาก "like" — กันไม่ให้ปุ่ม "+เพิ่มโซนสี" แบบรวมดันไปติดชิ้นของโซนก่อนหน้าโดยไม่ตั้งใจ)
+    const zone = { id: uid("z"), name: "", colorCode: "", refColor: refColor || "", weaveType, byArea: false, pct: 0, area: 0, presetId: "", yarnCode: yt.code, S: 28, R: 12, FPH: 9, TPH: 11, N: 4, Tex: yt.tex, mixEnabled: false, mix: [], pieceId: "", pieceSqm: 0 };
     const list = presets || [];
     const preset = list.find((p) => p.yarnCode === yt.code && p.structure === structure && p.quality === "45") || list.find((p) => p.yarnCode === yt.code && p.structure === structure);
     if (preset) applyPresetToZone(zone, preset);
@@ -473,11 +478,19 @@
   }
   function blankPiece(label, sqm) { return { id: uid("pc"), label: label || "", sqm: sqm || 0 }; }
   // ผลรวมพื้นที่จากรายการชิ้น (ถ้าใช้) — เรียกทุกจุดที่ต้องอัปเดต p.totalAreaSqm ให้ตรงกับผลรวมล่าสุดเสมอ
+  // และ sync "pieceSqm" ที่ cache ไว้ในแต่ละโซน (ข้อ 2) ให้ตรงกับพื้นที่ชิ้นล่าสุดเสมอ เพื่อให้ computeZone คำนวณถูกโดยไม่ต้องส่ง pieces array เข้าไปด้วย
   function syncPiecesTotal(p) {
-    if (Array.isArray(p.pieces) && p.pieces.length) {
-      p.totalAreaSqm = p.pieces.reduce((t, pc) => t + num(pc.sqm), 0);
+    const pieces = Array.isArray(p.pieces) ? p.pieces : [];
+    if (pieces.length) {
+      p.totalAreaSqm = pieces.reduce((t, pc) => t + num(pc.sqm), 0);
       p.areaSource = "pieces";
     }
+    (p.zones || []).forEach((z) => {
+      if (!z.pieceId) return;
+      const pc = pieces.find((x) => x.id === z.pieceId);
+      if (pc) z.pieceSqm = num(pc.sqm);
+      else { z.pieceId = ""; z.pieceSqm = 0; } // ชิ้นที่โซนนี้เคยผูกไว้ถูกลบไปแล้ว — ปลดออกมาเป็น "ยังไม่ระบุชิ้น" แทนที่จะค้างอ้างอิงชิ้นที่ไม่มีอยู่จริง
+    });
   }
 
   /* ============================================================
@@ -555,6 +568,30 @@
       zones.push(z);
     }
     state.plan.zones = zones;
+  }
+
+  // เหมือน generateAutoZones แต่ทำเฉพาะโซนของ "ชิ้น" เดียว (แทนที่เฉพาะโซนของชิ้นนั้น โซนของชิ้นอื่น/ที่ยังไม่ระบุชิ้นไม่กระทบ)
+  // ใช้ตอนระบบแยกพื้นที่เป็นรายชิ้นแล้ว — แต่ละชิ้นมีสี/สัดส่วนของตัวเอง รวม % กันเป็น 100% แยกกันต่อชิ้น
+  function generateAutoZonesForPiece(pieceId, n, palette) {
+    const presets = loadPresets();
+    const piece = (state.plan.pieces || []).find((pc) => pc.id === pieceId);
+    if (!piece) return;
+    const existing = state.plan.zones.filter((z) => z.pieceId === pieceId);
+    const template = existing[0] || null;
+    const zones = [];
+    const base = Math.floor(1000 / n);
+    let used = 0;
+    for (let i = 0; i < n; i++) {
+      const refColor = palette && palette[i] ? palette[i].hex : "";
+      const z = blankZone(template, presets, refColor);
+      const pctThousandths = i === n - 1 ? 1000 - used : base;
+      used += pctThousandths;
+      z.pct = Math.round(pctThousandths) / 10;
+      z.pieceId = pieceId;
+      z.pieceSqm = num(piece.sqm);
+      zones.push(z);
+    }
+    state.plan.zones = state.plan.zones.filter((z) => z.pieceId !== pieceId).concat(zones);
   }
 
   function moInfoFor(designId) {
@@ -725,6 +762,68 @@
       <td class="num"><strong>${kg ? fmt(kg, 3) : "-"}</strong></td>
       <td><button type="button" class="square-btn" data-del-zone="${zone.id}" title="ลบแถว">×</button></td>
     </tr>`;
+  }
+
+  // ตารางโซนสี 1 ชุด (ใช้ซ้ำได้ทั้งโหมดรวม/โหมดแยกชิ้น) — zonesComputed คือรายการที่ผ่าน computeZone แล้ว (มี areaSqm/weightPerSqmKg/baseKg)
+  function zoneTableHtml(zonesComputed, presets) {
+    return `<div class="pw-zone-scroll"><table class="calc-table pw-zone-table">
+      <thead><tr><th>#</th><th>รหัสสี</th><th>เทคนิคทอ</th><th>สัดส่วน</th><th>คุณภาพ</th><th class="num">น้ำหนัก (กก./ตร.ม.)</th><th class="num">พื้นที่ (ตร.ม.)</th><th class="num">น้ำหนักไหม (กก.)</th><th></th></tr></thead>
+      <tbody>${zonesComputed.length ? zonesComputed.map((z, i) => zoneRowHtml(z, i, presets, z)).join("") : `<tr><td colspan="9" class="col-empty">ยังไม่มีโซนสี</td></tr>`}</tbody>
+    </table></div>`;
+  }
+  // ผลรวม % ที่กรอกของโซนกลุ่มหนึ่ง เทียบกับพื้นที่ฐาน (areaBasis) ของกลุ่มนั้น — ใช้เตือนถ้ารวมแล้วไม่ครบ/เกิน 100%
+  function pctSumOf(zonesRaw, areaBasis) {
+    return zonesRaw.reduce((t, z) => t + (z.byArea ? (num(areaBasis) ? num(z.area) / num(areaBasis) * 100 : 0) : num(z.pct)), 0);
+  }
+  function pctSumResHtml(zonesRaw, areaBasis, label) {
+    const pctSum = pctSumOf(zonesRaw, areaBasis);
+    return res(label || "รวม % ที่กรอก", `${fmt(pctSum, 2)}%`, Math.abs(pctSum - 100) > 0.5 && zonesRaw.some((z) => !z.byArea) ? "warn" : "");
+  }
+  // ส่วน "คำนวณน้ำหนักไหมสั่งย้อม" ทั้งหมด — โหมดรวม (ไม่ได้แยกชิ้น) แสดงตารางเดียวเหมือนเดิมทุกประการ
+  // โหมดแยกชิ้น (p.pieces ไม่ว่าง) แสดงเป็นชุดแยกต่อชิ้น แต่ละชิ้นมีสี/สัดส่วน/ปุ่มเพิ่มโซน-สร้างอัตโนมัติของตัวเอง รวม % แยกกันเป็น 100% ต่อชิ้น
+  // (หม้อย้อมรวมข้ามชิ้นให้อัตโนมัติอยู่แล้วที่ตาราง "หม้อย้อม" ด้านนอกฟังก์ชันนี้ เพราะ potKeyOf จับกลุ่มตามรหัสสี+เทคนิคทอข้ามทุกโซนใน p.zones อยู่แล้ว)
+  function zoneCalcBodyHtml(p, dye, presets) {
+    const pieces = p.pieces || [];
+    if (!pieces.length) {
+      return `<div class="pw-row">
+          ${field("จำนวนสี", `<input id="pwAutoColorCount" type="number" min="1" max="20" value="${p.zones.length || 3}" class="pw-num tiny">`)}
+          <button type="button" class="action-button" data-auto-zones>AI สร้างแถวสีให้ (แบ่ง % เท่ากัน)</button>
+          <small class="muted">สร้างแถวใหม่ตามจำนวนสีที่ระบุ แบ่งเปอร์เซ็นต์เท่า ๆ กันให้อัตโนมัติ (แทนที่รายการเดิม) — ค่อยแก้รหัสสี/% เองภายหลัง</small>
+        </div>
+        ${zoneTableHtml(dye.zones, presets)}
+        <div class="pw-row">${pctSumResHtml(p.zones, p.totalAreaSqm)}</div>`;
+    }
+    const byPiece = pieces.map((pc, i) => {
+      const rawZones = p.zones.filter((z) => z.pieceId === pc.id);
+      const computedZones = dye.zones.filter((z) => z.pieceId === pc.id);
+      return `<div class="pw-piece-zone-group" data-piece-zone-group="${esc(pc.id)}">
+        <div class="pw-piece-zone-head">
+          <strong>ชิ้นที่ ${i + 1}: ${esc(pc.label || `ชิ้นที่ ${i + 1}`)}</strong><small>${fmt(num(pc.sqm), 2)} ตร.ม.</small>
+          <span class="pw-piece-zone-actions">
+            <input type="number" min="1" max="20" value="${rawZones.length || 3}" class="pw-num tiny" data-piece-autocount="${esc(pc.id)}" title="จำนวนสี">
+            <button type="button" class="action-button" data-auto-zones-piece="${esc(pc.id)}">AI สร้างแถวสีให้</button>
+            <button type="button" class="action-button" data-add-zone-piece="${esc(pc.id)}">+ เพิ่มโซนสี</button>
+          </span>
+        </div>
+        ${zoneTableHtml(computedZones, presets)}
+        <div class="pw-row">${pctSumResHtml(rawZones, pc.sqm, "รวม % ที่กรอก (ชิ้นนี้)")}</div>
+      </div>`;
+    }).join("");
+    const unassignedRaw = p.zones.filter((z) => !z.pieceId);
+    const unassignedComputed = dye.zones.filter((z) => !z.pieceId);
+    const unassignedHtml = unassignedRaw.length ? `<div class="pw-piece-zone-group pw-piece-zone-unassigned">
+        <div class="pw-piece-zone-head">
+          <strong>โซนที่ยังไม่ได้ระบุชิ้น</strong><small>ใช้ "พื้นที่รวม" ทั้งหมดเป็นฐานคำนวณ</small>
+          <span class="pw-piece-zone-actions">
+            <input id="pwAutoColorCount" type="number" min="1" max="20" value="${unassignedRaw.length || 3}" class="pw-num tiny" title="จำนวนสี">
+            <button type="button" class="action-button" data-auto-zones>AI สร้างแถวสีให้</button>
+            <button type="button" class="action-button" data-add-zone>+ เพิ่มโซนสี</button>
+          </span>
+        </div>
+        ${zoneTableHtml(unassignedComputed, presets)}
+        <div class="pw-row">${pctSumResHtml(unassignedRaw, p.totalAreaSqm, "รวม % ที่กรอก (ยังไม่ระบุชิ้น)")}</div>
+      </div>` : "";
+    return byPiece + unassignedHtml;
   }
 
   // แสดงที่มาของน้ำหนักไหมในหม้อย้อม เฉพาะเมื่อมีโซนสีผสม (Stipple) สมทบเข้ามา — ให้เห็นว่าแม่สีนี้มาจากโซนไหน
@@ -1228,7 +1327,6 @@
     const cost = laborCost(num(p.totalAreaSqm), weaveGrade);
     const info = designs.find((d) => d.id === p.designId) || {};
     const moSizes = moLineSizesRef(p.designId);
-    const pctSum = p.zones.reduce((t, z) => t + (z.byArea ? (num(p.totalAreaSqm) ? num(z.area) / num(p.totalAreaSqm) * 100 : 0) : num(z.pct)), 0);
     const dyeSeg = sched.segs[1];
     const weaveSeg = sched.segs[2];
     const dyeOrderRows = syncDyeOrders(p, dye.pots, dyeSeg);
@@ -1265,21 +1363,12 @@
     </section>
 
     <section class="department-panel pw-card wide">
-      <div class="panel-heading"><div><strong>2) คำนวณน้ำหนักไหมสั่งย้อม</strong><small>ระบุสี/สัดส่วน แล้วเลือก "คุณภาพ" ให้ AI คำนวณน้ำหนักไหมให้ (สูตร Stitch/Row/Pile Height/Tex/จำนวนเส้นไหม อ้างอิงไฟล์ Tufting Spec. ของฝ่ายผลิต) — เลือก "กำหนดพารามิเตอร์เอง" เฉพาะกรณีสเปคพิเศษเท่านั้น</small></div>
-        <button type="button" class="action-button" data-add-zone>+ เพิ่มโซนสี</button>
+      <div class="panel-heading"><div><strong>2) คำนวณน้ำหนักไหมสั่งย้อม</strong><small>ระบุสี/สัดส่วน แล้วเลือก "คุณภาพ" ให้ AI คำนวณน้ำหนักไหมให้ (สูตร Stitch/Row/Pile Height/Tex/จำนวนเส้นไหม อ้างอิงไฟล์ Tufting Spec. ของฝ่ายผลิต) — เลือก "กำหนดพารามิเตอร์เอง" เฉพาะกรณีสเปคพิเศษเท่านั้น${p.pieces.length ? " — แยกคำนวณเป็นชุดต่อชิ้น แล้วรวมหม้อย้อมสีเดียวกันให้อัตโนมัติด้านล่าง" : ""}</small></div>
+        ${p.pieces.length ? "" : `<button type="button" class="action-button" data-add-zone>+ เพิ่มโซนสี</button>`}
       </div>
       <div class="pw-body">
+        ${zoneCalcBodyHtml(p, dye, presets)}
         <div class="pw-row">
-          ${field("จำนวนสี", `<input id="pwAutoColorCount" type="number" min="1" max="20" value="${p.zones.length || 3}" class="pw-num tiny">`)}
-          <button type="button" class="action-button" data-auto-zones>AI สร้างแถวสีให้ (แบ่ง % เท่ากัน)</button>
-          <small class="muted">สร้างแถวใหม่ตามจำนวนสีที่ระบุ แบ่งเปอร์เซ็นต์เท่า ๆ กันให้อัตโนมัติ (แทนที่รายการเดิม) — ค่อยแก้รหัสสี/% เองภายหลัง</small>
-        </div>
-        <div class="pw-zone-scroll"><table class="calc-table pw-zone-table">
-          <thead><tr><th>#</th><th>รหัสสี</th><th>เทคนิคทอ</th><th>สัดส่วน</th><th>คุณภาพ</th><th class="num">น้ำหนัก (กก./ตร.ม.)</th><th class="num">พื้นที่ (ตร.ม.)</th><th class="num">น้ำหนักไหม (กก.)</th><th></th></tr></thead>
-          <tbody id="pwZoneBody">${dye.zones.map((z, i) => zoneRowHtml(z, i, presets, z)).join("")}</tbody>
-        </table></div>
-        <div class="pw-row">
-          ${res("รวม % ที่กรอก", `${fmt(pctSum, 2)}%`, Math.abs(pctSum - 100) > 0.5 && p.zones.some((z) => !z.byArea) ? "warn" : "")}
           ${field("บวกเผื่อ (%)", inp("bufferPct", p.bufferPct, 'class="pw-num"'))}
           ${res("น้ำหนักไหมฐานรวม", `${fmt(dye.totalBaseKg, 3)} กก.`)}
           ${res("ยอดสั่งย้อมสุทธิ (รวมเผื่อ)", `${fmt(dye.totalNetKg, 3)} กก.`, "main")}
@@ -1288,6 +1377,7 @@
           <thead><tr><th>หม้อย้อม</th><th>จำนวนโซน</th><th class="num">น้ำหนักฐาน (กก.)</th><th class="num">สั่งย้อมสุทธิ +${fmt(num(p.bufferPct), 0)}% (กก.)</th></tr></thead>
           <tbody>${dye.pots.length ? dye.pots.map((pot) => `<tr><td>${esc(pot.label)}${potContributionHtml(pot)}</td><td>${pot.zones.length}</td><td class="num">${fmt(pot.baseKg, 3)}</td><td class="num"><strong>${fmt(pot.netKg, 3)}</strong></td></tr>`).join("") : `<tr><td colspan="4" class="empty-gantt">ยังไม่มีโซน</td></tr>`}</tbody>
         </table></div>
+        ${p.pieces.length ? `<p class="col-empty" style="text-align:left;padding:6px 2px 0">หมายเหตุ: ตาราง "หม้อย้อม" ด้านบนรวมทุกชิ้นเข้าด้วยกันแล้วอัตโนมัติ — ถ้าชิ้นต่าง ๆ ใช้ "รหัสสี" และ "เทคนิคทอ" เดียวกัน ระบบจะถือว่าเป็นหม้อย้อมเดียวกันและรวมน้ำหนักให้เอง ไม่ต้องคำนวณรวมเอง</p>` : ""}
       </div>
     </section>
 
@@ -1500,6 +1590,21 @@
       }
       const delZone = e.target.closest("[data-del-zone]");
       if (delZone) { state.plan.zones = state.plan.zones.filter((z) => z.id !== delZone.dataset.delZone); renderForm(); return; }
+      // "+ เพิ่มโซนสี" แบบผูกกับชิ้นใดชิ้นหนึ่งโดยเฉพาะ (โหมดแยกชิ้น) — ตั้ง pieceId/pieceSqm ให้ตรงกับชิ้นนั้นทันที ไม่กระทบโซนของชิ้นอื่น
+      const addZonePiece = e.target.closest("[data-add-zone-piece]");
+      if (addZonePiece) {
+        const pieceId = addZonePiece.dataset.addZonePiece;
+        const piece = (state.plan.pieces || []).find((pc) => pc.id === pieceId);
+        if (!piece) return;
+        const existing = state.plan.zones.filter((z) => z.pieceId === pieceId);
+        const prev = existing[existing.length - 1] || null;
+        const z = blankZone(prev, loadPresets());
+        z.pieceId = pieceId;
+        z.pieceSqm = num(piece.sqm);
+        state.plan.zones.push(z);
+        renderForm();
+        return;
+      }
       const piecesStart = e.target.closest("[data-pieces-start]");
       if (piecesStart) {
         state.plan.pieces = [blankPiece("ชิ้นที่ 1", state.plan.totalAreaSqm), blankPiece("ชิ้นที่ 2", 0)];
@@ -1520,6 +1625,17 @@
       const piecesClear = e.target.closest("[data-pieces-clear]");
       if (piecesClear) {
         if (confirm("เลิกใช้ระบบแยกชิ้น แล้วกลับไปกรอก \"พื้นที่รวม\" เป็นค่าเดียว (ค่าล่าสุดที่รวมได้จะยังคงอยู่) หรือไม่?")) {
+          // ก่อนปลด pieceId ออกจากทุกโซน ปรับ % ของแต่ละโซนที่ผูกกับชิ้น (ตามสัดส่วน) ให้เทียบกับพื้นที่รวมทั้งหมดแทนพื้นที่ของชิ้นตัวเอง
+          // เพื่อรักษาพื้นที่/น้ำหนักไหมที่คำนวณได้จริงของแต่ละโซนไว้เหมือนเดิม (กันปัญหา % รวมกันได้ 200% แบบที่ผู้ใช้เจอตอนกรอกเองด้วยมือ)
+          const combinedTotal = num(state.plan.totalAreaSqm);
+          state.plan.zones.forEach((z) => {
+            if (z.pieceId && !z.byArea && combinedTotal > 0) {
+              const pieceSqm = num(z.pieceSqm);
+              z.pct = num(z.pct) * (pieceSqm / combinedTotal);
+            }
+            z.pieceId = "";
+            z.pieceSqm = 0;
+          });
           state.plan.pieces = [];
           state.plan.areaSource = "manual";
           renderForm();
@@ -1530,7 +1646,11 @@
       if (addPiece) { state.plan.pieces.push(blankPiece(`ชิ้นที่ ${state.plan.pieces.length + 1}`, 0)); renderForm(); return; }
       const delPiece = e.target.closest("[data-del-piece]");
       if (delPiece) {
-        state.plan.pieces = state.plan.pieces.filter((pc) => pc.id !== delPiece.dataset.delPiece);
+        const pieceId = delPiece.dataset.delPiece;
+        const affected = state.plan.zones.filter((z) => z.pieceId === pieceId).length;
+        // ถ้าชิ้นนี้มีโซนสีผูกอยู่ เตือนก่อนลบ — ข้อมูลโซนจะไม่หาย แค่กลายเป็น "ยังไม่ได้ระบุชิ้น" (syncPiecesTotal จะปลด pieceId ให้เอง)
+        if (affected && !confirm(`ชิ้นนี้มีโซนสีผูกอยู่ ${affected} รายการ — ถ้าลบชิ้นนี้ โซนสีเหล่านั้นจะกลายเป็น "ยังไม่ได้ระบุชิ้น" (ข้อมูลรหัสสี/สัดส่วนจะยังอยู่ ไม่หาย) ต้องการดำเนินการต่อหรือไม่?`)) return;
+        state.plan.pieces = state.plan.pieces.filter((pc) => pc.id !== pieceId);
         syncPiecesTotal(state.plan);
         renderForm();
         return;
@@ -1561,6 +1681,21 @@
         if (n > 20) n = 20;
         if (state.plan.zones.length && !confirm(`สร้างแถวสีใหม่ ${n} แถว จะแทนที่รายการสีเดิมทั้งหมด ต้องการดำเนินการต่อหรือไม่?`)) return;
         generateAutoZones(n, null);
+        renderForm();
+        return;
+      }
+      // "AI สร้างแถวสีให้" แบบผูกกับชิ้นใดชิ้นหนึ่งโดยเฉพาะ (โหมดแยกชิ้น) — แทนที่เฉพาะโซนของชิ้นนั้น ชิ้นอื่น/ที่ยังไม่ระบุชิ้นไม่กระทบ
+      const autoZonesPiece = e.target.closest("[data-auto-zones-piece]");
+      if (autoZonesPiece) {
+        const pieceId = autoZonesPiece.dataset.autoZonesPiece;
+        const group = autoZonesPiece.closest("[data-piece-zone-group]");
+        const countInput = group ? group.querySelector("[data-piece-autocount]") : null;
+        let n = Math.round(Number(countInput ? countInput.value : 0));
+        if (!n || n < 1) n = 1;
+        if (n > 20) n = 20;
+        const existing = state.plan.zones.filter((z) => z.pieceId === pieceId);
+        if (existing.length && !confirm(`สร้างแถวสีใหม่ ${n} แถวสำหรับชิ้นนี้ จะแทนที่รายการสีเดิมของชิ้นนี้ทั้งหมด (ชิ้นอื่นไม่กระทบ) ต้องการดำเนินการต่อหรือไม่?`)) return;
+        generateAutoZonesForPiece(pieceId, n, null);
         renderForm();
         return;
       }

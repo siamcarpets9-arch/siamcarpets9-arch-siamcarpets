@@ -30,6 +30,16 @@
 .pw-pieces-table input{width:100%;box-sizing:border-box}
 .pw-piece-label{min-width:180px}
 .pw-pieces-toggle{align-items:center}
+
+/* คำนวณน้ำหนักไหมสั่งย้อมแบบแยกชิ้น (แต่ละชิ้นมีสี/สัดส่วน/ตารางของตัวเอง) */
+.pw-piece-zone-group{margin-bottom:14px;padding:8px 10px 10px;background:#f7faf9;border:1px solid var(--line)}
+.pw-piece-zone-group:last-child{margin-bottom:0}
+.pw-piece-zone-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-bottom:8px}
+.pw-piece-zone-head strong{font-size:11px;color:var(--ink)}
+.pw-piece-zone-head small{color:var(--muted);font-size:9px}
+.pw-piece-zone-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-left:auto}
+.pw-piece-zone-actions input{width:56px;box-sizing:border-box}
+.pw-piece-zone-unassigned{background:#fdf7ef;border-style:dashed}
 .pr small{color:var(--muted);font-size:9px}
 .pr strong{margin:3px 0 1px;font-size:13px}
 .pr span{color:var(--muted);font-size:9px}
