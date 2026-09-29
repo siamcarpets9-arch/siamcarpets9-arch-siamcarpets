@@ -41,6 +41,7 @@
 
   function blankFinishRec() {
     return {
+      isExtra: false, customLabel: "",
       receivedDate: "", receivedTime: "",
       glue: {
         plasticSheet: false,
@@ -144,7 +145,29 @@
     if (!rec.finish) rec.finish = blankFinishRec().finish;
     if (!rec.transport) rec.transport = blankFinishRec().transport;
     if (!rec.extraCosts) rec.extraCosts = [];
+    if (rec.isExtra == null) rec.isExtra = false;
+    if (rec.customLabel == null) rec.customLabel = "";
     return rec;
+  }
+  // เพิ่ม/ลบ "รายการที่แผนกตกแต่งเพิ่มเอง" — ใช้เมื่อมีพรมที่ต้องทากาวตกแต่งแต่ไม่ได้มาจากแผนกทอ (เช่น รับตรงจากลูกค้า/งานแก้ไข)
+  // ตามรูปแบบเดียวกับ "+ เพิ่มจอทอ" ของแผนกทอ (isExtra + customLabel, ลบได้เฉพาะรายการที่เพิ่มเอง)
+  function addExtraFinishPiece(designId) {
+    const dfin = ensureDesignFinish(designId);
+    const key = uid("extra");
+    const rec = blankFinishRec();
+    rec.isExtra = true;
+    dfin.pieces[key] = rec;
+    saveDesignFinish(designId, dfin);
+    return key;
+  }
+  function removeExtraFinishPiece(designId, key) {
+    const dfin = ensureDesignFinish(designId);
+    if (dfin.pieces[key] && dfin.pieces[key].isExtra) {
+      delete dfin.pieces[key];
+      saveDesignFinish(designId, dfin);
+      return true;
+    }
+    return false;
   }
   // ดึง "ราคาผ้าตาข่าย" จากราคาวัตถุดิบกลาง (หน้าต้นทุน) มาเติมให้ครั้งแรกที่ยังไม่เคยกรอก — แก้ไขทับได้เสมอ
   function applyMeshPriceDefault(rec, dfin) {
@@ -164,6 +187,7 @@
      ============================================================ */
   function readyFinishPieces() {
     const floor = WF().loadFloorAll();
+    const finishAll = loadFinishAll();
     const isSkipped = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.isSkipped ? OverviewEngine.isSkipped(id) : false;
     const isSO = (id) => typeof OverviewEngine !== "undefined" && OverviewEngine.typeOf ? OverviewEngine.typeOf({ id }) === "SO" : false;
     const refs = [];
@@ -177,8 +201,17 @@
       Object.keys(pieces).forEach((lineIdx) => {
         const piece = pieces[lineIdx];
         if (!piece.transferredToGlueAt) return;
-        const line = lines[lineIdx] || { location: `ชิ้นที่ ${Number(lineIdx) + 1}` };
-        refs.push({ designId, lineIdx, plan, line, weavePiece: piece, totalArea: num(line.sqm) || num(plan.totalAreaSqm) });
+        // จอที่แผนกทอเพิ่มเอง (isExtra, เช่น แบ่งทอชิ้นเดียวกันหลายจอ) ไม่มี lines[lineIdx] จริง — ใช้ป้าย/พื้นที่ของจอนั้นเอง (WF().lineOrCustomFor) แทน
+        const line = WF().lineOrCustomFor ? WF().lineOrCustomFor(lines, lineIdx, piece) : (lines[lineIdx] || { location: `ชิ้นที่ ${Number(lineIdx) + 1}` });
+        refs.push({ designId, lineIdx, plan, line, weavePiece: piece, totalArea: num(line.sqm) || num(plan.totalAreaSqm), isExtra: false });
+      });
+      // รายการที่แผนกตกแต่งเพิ่มเอง (isExtra) — ไม่ได้โอนมาจากแผนกทอ ไม่มี weavePiece จริง ใช้ customLabel ของตัวเองแทน (เช่น รับตรงจากลูกค้า/งานแก้ไข)
+      const finPieces = (finishAll[designId] && finishAll[designId].pieces) || {};
+      Object.keys(finPieces).forEach((key) => {
+        const rec = finPieces[key];
+        if (!rec || !rec.isExtra) return;
+        if (pieces[key]) return; // กันซ้ำ เผื่อคีย์ชนกับของแผนกทอ (ไม่ควรเกิดเพราะคีย์ของรายการเพิ่มเองใช้ uid เฉพาะ)
+        refs.push({ designId, lineIdx: key, plan, line: { location: rec.customLabel || "รายการเพิ่มเติม", sqm: 0 }, weavePiece: null, totalArea: 0, isExtra: true });
       });
     });
     return refs;
@@ -194,18 +227,27 @@
   }
 
   function tabBar() {
-    const tabs = [["glue", "รับพรม + ทากาว"], ["finish", "แห้ง + ตกแต่ง + QC"], ["cost", "ต้นทุนต่อ M/O"]];
+    const tabs = [["glue", "รับพรม + ทากาว"], ["finish", "แห้ง + ตกแต่ง + QC"], ["cost", "ค่าใช้จ่ายเพิ่มเติม"]];
     return `<div class="control-strip"><div class="segmented">${tabs.map(([k, l]) => `<button type="button" class="view-btn ${state.tab === k ? "active" : ""}" data-fntab="${k}">${l}</button>`).join("")}</div></div>`;
+  }
+
+  // "+ เพิ่มรายการ" — เพิ่มรายการที่แผนกตกแต่งเองได้ (เช่น รับตรงจากลูกค้า/งานแก้ไข ที่ไม่ได้ผ่านแผนกทอ) ผูกกับ M/O ที่กำลังเลือกอยู่เท่านั้น (เลือก M/O จากการ์ดด้านล่างก่อน)
+  function addFinishPieceBarHtml() {
+    if (!state.designId) return "";
+    return `<div class="pw-save-bar" style="margin-bottom:8px"><button type="button" class="action-button" data-add-finish-piece="${esc(state.designId)}">+ เพิ่มรายการ (สำหรับ M/O ที่เลือกอยู่)</button></div>`;
   }
 
   function pieceJobPickerHtml() {
     const refs = readyFinishPieces();
-    if (!refs.length) return `<p class="col-empty">ยังไม่มีชิ้นที่โอนจากแผนกทอ — ต้องทอครบ 100% แล้วกด “โอนให้แผนกทากาวตกแต่ง” ที่หน้า “แผนกทอ → หน้าจอทอ (ภาพรวม)” ก่อน</p>`;
-    return `<div class="pw-job-grid">${refs.map((r) => `<div class="pw-job-card-wrap">
+    if (!refs.length) return `${addFinishPieceBarHtml()}<p class="col-empty">ยังไม่มีชิ้นที่โอนจากแผนกทอ — ต้องทอครบ 100% แล้วกด “โอนให้แผนกทากาวตกแต่ง” ที่หน้า “แผนกทอ → หน้าจอทอ (ภาพรวม)” ก่อน</p>`;
+    return `${addFinishPieceBarHtml()}<div class="pw-job-grid">${refs.map((r) => `<div class="pw-job-card-wrap">
       <button type="button" class="pw-job-card dept-finishing ${state.designId === r.designId && state.lineIdx == r.lineIdx ? "active" : ""}" data-fnpick-design="${esc(r.designId)}" data-fnpick-line="${esc(r.lineIdx)}">
-        <strong>${esc(r.plan.moNo || r.designId)}</strong><span>${esc(r.line.location || `ชิ้นที่ ${Number(r.lineIdx) + 1}`)}</span><small>จอ ${esc(r.weavePiece.loomNo || "-")} · โอนแล้ว ${new Date(r.weavePiece.transferredToGlueAt).toLocaleDateString("th-TH")}</small>
+        <strong>${esc(r.plan.moNo || r.designId)}</strong><span>${esc(r.line.location || `ชิ้นที่ ${Number(r.lineIdx) + 1}`)}</span>
+        <small>${r.isExtra ? `<span class="status-tag review">รายการเพิ่มเอง</span>` : `จอ ${esc(r.weavePiece.loomNo || "-")} · โอนแล้ว ${new Date(r.weavePiece.transferredToGlueAt).toLocaleDateString("th-TH")}`}</small>
         ${typeof NewBadge !== "undefined" ? NewBadge.badgeHtml("finishing", r.designId) : ""}
-      </button>${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(r.designId, r.plan.moNo || r.designId) : ""}
+      </button>
+      ${r.isExtra ? `<button type="button" class="ovw-skip-btn pw-job-card-del-btn" data-del-finish-piece="${esc(r.lineIdx)}" data-del-finish-design="${esc(r.designId)}" title="ลบรายการที่เพิ่มเองนี้">ลบ</button>` : ""}
+      ${typeof OverviewEngine !== "undefined" && OverviewEngine.skipButtonHtml ? OverviewEngine.skipButtonHtml(r.designId, r.plan.moNo || r.designId) : ""}
     </div>`).join("")}</div>`;
   }
 
@@ -224,12 +266,16 @@
     const area = areaBeforeGlue(rec), std = standardGlueKg(rec), actual = actualGlueKg(rec), variance = glueVariancePct(rec);
     return `
     <section class="department-panel pw-card">
-      <div class="panel-heading"><div><strong>รับพรมจากแผนกทอ</strong><small>M/O ${esc(ref.plan.moNo || ref.designId)} · ${esc(ref.line.location || "-")}</small></div></div>
+      <div class="panel-heading"><div><strong>${ref.isExtra ? "รายการที่เพิ่มเอง" : "รับพรมจากแผนกทอ"}</strong><small>M/O ${esc(ref.plan.moNo || ref.designId)} · ${esc(ref.line.location || "-")}</small></div></div>
       <div class="pw-body">
+        ${ref.isExtra ? `<div class="pw-row">
+          ${field("ชื่อรายการ", `<input data-ff="customLabel" value="${esc(rec.customLabel)}" placeholder="เช่น รับตรงจากลูกค้า/งานแก้ไข">`)}
+          <button type="button" class="action-button" data-del-finish-piece="${esc(state.lineIdx)}" data-del-finish-design="${esc(state.designId)}" title="ลบรายการที่เพิ่มเองนี้">🗑 ลบรายการนี้</button>
+        </div>` : ""}
         <div class="pw-row">
-          ${field("วันที่รับพรม", `<input type="date" data-ff="receivedDate" value="${esc(rec.receivedDate)}">`)}
+          ${field(ref.isExtra ? "วันที่รับ" : "วันที่รับพรม", `<input type="date" data-ff="receivedDate" value="${esc(rec.receivedDate)}">`)}
           ${field("เวลาที่รับ", `<input type="time" data-ff="receivedTime" value="${esc(rec.receivedTime)}">`)}
-          ${res("โอนจากแผนกทอเมื่อ", new Date(ref.weavePiece.transferredToGlueAt).toLocaleString("th-TH"))}
+          ${ref.isExtra ? "" : res("โอนจากแผนกทอเมื่อ", new Date(ref.weavePiece.transferredToGlueAt).toLocaleString("th-TH"))}
         </div>
       </div>
     </section>
@@ -515,13 +561,11 @@
     <p style="color:var(--muted);font-size:10px;margin:6px 2px 0">หมายเหตุ: ตารางนี้รวม<strong>ทุก M/O ในทะเบียนขาย ทั้งที่ส่งแล้วและยังไม่ส่ง</strong> ไม่ใช่แค่ M/O ที่บันทึกใบวางแผนงานหรือถึงแผนกตกแต่งแล้วเหมือนเดิม · ช่องตัวเลขทุกคอลัมน์ (ยกเว้นยอดขาย) <strong>คีย์แก้ไขทับค่าที่คำนวณอัตโนมัติได้โดยตรง</strong> พิมพ์แล้วบันทึกทันที กด ↺ ข้าง ๆ ช่องเพื่อกลับไปใช้ค่าอัตโนมัติ · คอลัมน์ “อื่น ๆ” กด “แก้ไข” เพื่อเพิ่ม/แก้/ลบรายการค่าใช้จ่ายอื่นของ M/O นั้นได้ตรงนี้เลย (รายการเดียวกับที่ทุกแผนกเห็นและเพิ่มได้) · ต้นทุนออกแบบคำนวณจากหน้า “ต้นทุน M/O” (เงินเดือน Designer ÷ ชั่วโมงทำงาน) เฉพาะ M/O ที่ผูกกับงานทำแบบจริงในทะเบียน Design เท่านั้น · ค่าแรงทอ+แต่งใช้สูตรเดียวกับหน้าใบวางแผนงาน (พื้นที่ × ค่าแรงเกรด + พื้นที่ × 400 บาท/ตร.ม. สำหรับแต่ง/ทากาว — สมมติฐานหน่วย ยังไม่ยืนยันกับฝ่ายบัญชี) · ค่าแรงแผนกเจาะลาย/ขยายลาย ยังไม่มีอัตราค่าจ้างยืนยัน จึงไม่รวมในยอดอัตโนมัติ (คีย์เพิ่มเองได้ที่ช่อง "ค่าแรงทอ+แต่ง") · ค่าไหมในค่าไหม/ย้อมดึงราคาวัตถุดิบปัจจุบันจากหน้า “ต้นทุน” มาเป็นค่าเริ่มต้นให้อัตโนมัติ (แก้ไขเฉพาะออเดอร์ได้เสมอ) · ยอดขายเทียบสกุลเงินตามที่บันทึกในหน้ารายงานขาย (ต่างประเทศเป็น USD ในประเทศเป็น THB — ไม่ได้แปลงอัตราแลกเปลี่ยนให้)</p>` : `<p class="col-empty">ยังไม่มี M/O ในทะเบียนขาย</p>`;
   }
 
+  // ตารางสรุปต้นทุนรวมทุก M/O (costRollupTableHtml) ไม่แสดงซ้ำที่แผนกตกแต่งแล้ว — ดูสรุปรวมทั้งหมดได้ที่หน้า “ต้นทุน M/O” ส่วนกลาง (cost.js)
+  // แท็บนี้ที่แผนกตกแต่งใช้กรอก "ค่าขนส่ง/ค่าใช้จ่ายเพิ่มเติม" ต่อชิ้นเท่านั้น ซึ่งจะไหลไปรวมในหน้าต้นทุนกลางให้อัตโนมัติ
   function costTabHtml() {
     return `
-    <section class="department-panel pw-card wide">
-      <div class="panel-heading"><div><strong>สรุปต้นทุนต่อ M/O</strong><small>รวมต้นทุนออกแบบ + ค่าไหม/ย้อม (จากใบสั่งย้อมในใบวางแผนงาน) + ค่าแรงทอ+แต่ง (สูตรประมาณของ Planning) + ค่าผ้าตาข่าย/กาว + ค่าขนส่ง/พนักงานเพิ่ม (เฉพาะขายในประเทศ) + รายการอื่น ๆ — ตัวเลขราคาที่ยังไม่มีข้อมูลจริงเริ่มต้นที่ 0 ทั้งหมด กรอกเพิ่มได้ตามจริง · ดูสรุปรวมทุก M/O ได้ที่แท็บ “ต้นทุน M/O”</small></div></div>
-      <div class="pw-body">${costRollupTableHtml()}</div>
-    </section>
-
+    <p class="col-empty">ดูสรุปต้นทุนรวมทุก M/O ได้ที่เมนู “ต้นทุน M/O” ด้านบน — แท็บนี้ใช้กรอกค่าขนส่ง/ค่าใช้จ่ายเพิ่มเติมของชิ้นที่เลือกเท่านั้น</p>
     ${currentRef() ? costDetailHtml() : `<p class="col-empty">เลือกชิ้นในแท็บ “รับพรม + ทากาว” เพื่อกรอกค่าขนส่ง/ค่าใช้จ่ายเพิ่มเติมของ M/O นั้น</p>`}`;
   }
 
@@ -601,6 +645,23 @@
       if (expFw) { exportFinWorkersExcel(); return; }
       const pick = e.target.closest("[data-fnpick-design]");
       if (pick) { state.designId = pick.dataset.fnpickDesign; state.lineIdx = pick.dataset.fnpickLine; if (typeof NewBadge !== "undefined") NewBadge.markSeen("finishing", state.designId); renderAll(); return; }
+      const addFinPiece = e.target.closest("[data-add-finish-piece]");
+      if (addFinPiece) {
+        const designId = addFinPiece.dataset.addFinishPiece;
+        const key = addExtraFinishPiece(designId);
+        state.designId = designId; state.lineIdx = key; state.tab = "glue";
+        toast("เพิ่มรายการใหม่แล้ว — กรอกชื่อรายการ/ข้อมูลด้านล่างได้เลย");
+        renderAll(); return;
+      }
+      const delFinPiece = e.target.closest("[data-del-finish-piece]");
+      if (delFinPiece) {
+        if (!confirm("ยืนยันลบรายการที่เพิ่มเองนี้ — ข้อมูลทากาว/ตกแต่ง/ต้นทุนของรายการนี้จะหายไปด้วย")) return;
+        const designId = delFinPiece.dataset.delFinishDesign, key = delFinPiece.dataset.delFinishPiece;
+        const ok = removeExtraFinishPiece(designId, key);
+        if (ok && state.designId === designId && String(state.lineIdx) === String(key)) { state.designId = null; state.lineIdx = null; }
+        toast(ok ? "ลบรายการที่เพิ่มเองแล้ว" : "ลบไม่สำเร็จ — ลบได้เฉพาะรายการที่เพิ่มเอง");
+        renderAll(); return;
+      }
       const moSkip = e.target.closest("[data-mo-skip]");
       if (moSkip) {
         if (typeof OverviewEngine === "undefined" || !OverviewEngine.setSkipped) return;
@@ -800,6 +861,7 @@
 
   window.FinishingEngine = {
     KEY_FINISH, loadFinishAll, ensureDesignFinish, saveDesignFinish, ensurePieceFinish, areaBeforeGlue, standardGlueKg, actualGlueKg, glueVariancePct, costRollupFor, allCostRollups, costRollupTableHtml, readyFinishPieces,
+    addExtraFinishPiece, removeExtraFinishPiece,
     // สรุปต้นทุนต่อ M/O — คีย์แก้ไขทับค่าอัตโนมัติได้ทุกหมวด + เปิด/ปิดแก้ไขรายการ "อื่น ๆ" ต่อแถว (ใช้ร่วมกันได้ทั้งแท็บนี้เองและหน้า "ต้นทุน M/O" ส่วนกลางใน cost.js)
     loadMoCostOverrides: loadCostOverrides, saveMoCostOverride, patchMoRollupRow, toggleMoExpand, isMoExpanded
   };

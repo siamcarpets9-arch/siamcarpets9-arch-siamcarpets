@@ -444,6 +444,39 @@
     book[grade] = num(ratePerSqm);
     writeJson(KEY_WEAVE_OUT_RATEBOOK, book);
   }
+  // งานจ้างทอนอกที่ "รับเข้า" แล้ว (มีวันที่รับ) แต่ไม่ผ่านขั้นตอนขึ้นทอในบริษัท (weave-floor.js) เลย จึงไม่มีทาง "โอนให้แผนกทากาวตกแต่ง"
+  // ผ่านปุ่มปกติได้ — เขียน piece ของแผนกทอ (siam-weave-floor) ให้ตรงกับทุกชิ้น/ทุกไซส์ของ M/O นี้ พร้อม transferredToGlueAt ให้อัตโนมัติ
+  // เพื่อให้ขึ้นคิวที่แผนกตกแต่งได้ทันที ไม่ต้องผ่านแผนกทอในระบบ (เหมือนวันที่รับเข้างานจ้างย้อมนอก → ติ๊ก "เส้นด้ายพร้อม" อัตโนมัติ)
+  function syncOutsourcedWeaveTransfer(p, designId) {
+    const wo = p.weaveOutsource;
+    if (!wo || !wo.enabled) return;
+    try {
+      const WF = typeof WeaveFloorEngine !== "undefined" ? WeaveFloorEngine : null;
+      const KEY = (WF && WF.KEY_FLOOR) || "siam-weave-floor";
+      const all = readJson(KEY, {});
+      if (!all[designId]) all[designId] = { pieces: {}, yarnDraw: {} };
+      if (!all[designId].pieces) all[designId].pieces = {};
+      const lines = WF && WF.linesOf ? WF.linesOf(designId, p) : [{ location: "", sqm: p.totalAreaSqm }];
+      let changed = false;
+      lines.forEach((line, idx) => {
+        if (!all[designId].pieces[idx]) all[designId].pieces[idx] = { loomNo: "", gradeOverride: "", patternImage: "", note: "", days: {} };
+        const piece = all[designId].pieces[idx];
+        if (has(wo.receivedDate)) {
+          if (!piece.transferredToGlueAt) {
+            piece.transferredToGlueAt = (isoToDate(wo.receivedDate) || new Date()).toISOString();
+            if (!has(piece.loomNo)) piece.loomNo = `จ้างทอนอก${wo.vendor ? " · " + wo.vendor : ""}`;
+            piece.autoTransferFromOutsource = true;
+            changed = true;
+          }
+        } else if (piece.autoTransferFromOutsource) {
+          piece.transferredToGlueAt = null;
+          piece.autoTransferFromOutsource = false;
+          changed = true;
+        }
+      });
+      if (changed) writeJson(KEY, all);
+    } catch (e) { /* หน้าแผนกทอ/ตกแต่งยังไม่เคยเปิด หรือ localStorage ใช้ไม่ได้ — ไม่กระทบการบันทึกแผนของหน้านี้ */ }
+  }
   // สร้าง/อัปเดตข้อมูลจ้างทอภายนอกของแผน — วันที่ส่ง/วันที่ต้องการผูกกับกำหนดการ "ทอพรม" ใน Master Plan อัตโนมัติ (ถ้ายังไม่ถูกแก้เอง)
   function syncWeaveOutsource(p, weaveSeg, grade) {
     if (!p.weaveOutsource) p.weaveOutsource = blankWeaveOutsource(weaveSeg);
@@ -454,6 +487,7 @@
       const suggested = loadWeaveOutRateBook()[grade];
       if (suggested) rec.ratePerSqm = suggested;
     }
+    syncOutsourcedWeaveTransfer(p, p.designId);
     return rec;
   }
 

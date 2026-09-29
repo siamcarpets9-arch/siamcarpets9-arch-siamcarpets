@@ -48,9 +48,37 @@
   function saveDesignFloor(designId, rec) { const all = loadFloorAll(); all[designId] = rec; saveFloorAll(all); }
 
   function ensurePieceRec(dfloor, lineIdx) {
-    if (!dfloor.pieces[lineIdx]) dfloor.pieces[lineIdx] = { loomNo: "", gradeOverride: "", patternImage: "", note: "", days: {} };
-    if (dfloor.pieces[lineIdx].note == null) dfloor.pieces[lineIdx].note = "";
-    return dfloor.pieces[lineIdx];
+    if (!dfloor.pieces[lineIdx]) dfloor.pieces[lineIdx] = { loomNo: "", gradeOverride: "", patternImage: "", note: "", days: {}, isExtra: false, customLabel: "", customArea: 0 };
+    const rec = dfloor.pieces[lineIdx];
+    if (rec.note == null) rec.note = "";
+    if (rec.isExtra == null) rec.isExtra = false;
+    if (rec.customLabel == null) rec.customLabel = "";
+    if (rec.customArea == null) rec.customArea = 0;
+    return rec;
+  }
+  // "จอทอ" ที่เพิ่มเองนอกเหนือจากจำนวนไซส์/รายการในใบสั่ง M/O — ใช้เมื่อต้องแบ่งทอชิ้นเดียวกันพร้อมกันหลายจอ หรือมีจอเพิ่มเติมที่ไม่ได้ระบุเป็นรายการแยกในใบสั่งขาย
+  // มีพื้นที่เป้าหมาย (customArea) + ป้ายอ้างอิง (customLabel) เป็นของตัวเอง ไม่ผูกกับ lines[] ของใบสั่ง — ลบได้เฉพาะจอที่เพิ่มเอง (isExtra) กันลบจอจริงของใบสั่งโดยไม่ตั้งใจ
+  function addExtraLoom(designId) {
+    const dfloor = ensureDesignFloor(designId);
+    const key = uid("extra");
+    dfloor.pieces[key] = { loomNo: "", gradeOverride: "", patternImage: "", note: "", days: {}, isExtra: true, customLabel: "", customArea: 0 };
+    saveDesignFloor(designId, dfloor);
+    return key;
+  }
+  function removeExtraLoom(designId, key) {
+    const dfloor = ensureDesignFloor(designId);
+    if (dfloor.pieces[key] && dfloor.pieces[key].isExtra) {
+      delete dfloor.pieces[key];
+      saveDesignFloor(designId, dfloor);
+      return true;
+    }
+    return false;
+  }
+  // ดึง "ชิ้น/Location" + พื้นที่เป้าหมาย ของจอนี้ — จอจริงในใบสั่งใช้ lines[key] ตามเดิม จอที่เพิ่มเอง (isExtra) ใช้ customLabel/customArea ของตัวเองแทน
+  function lineOrCustomFor(lines, key, piece) {
+    if (lines[key]) return lines[key];
+    if (piece && piece.isExtra) return { location: piece.customLabel || "จอเพิ่มเติม", sqm: num(piece.customArea) };
+    return { location: `ชิ้นที่ ${Number(key) + 1}`, sqm: 0 };
   }
   function ensureDayRec(piece, iso) {
     if (!piece.days[iso]) piece.days[iso] = {
@@ -213,7 +241,7 @@
       const lines = linesOf(designId, plan);
       const pieces = all[designId].pieces || {};
       Object.keys(pieces).forEach((lineIdx) => {
-        const line = lines[lineIdx] || { location: `ชิ้นที่ ${Number(lineIdx) + 1}`, sqm: 0 };
+        const line = lineOrCustomFor(lines, lineIdx, pieces[lineIdx]);
         const grade = pieces[lineIdx].gradeOverride || suggestedGradeFor(plan);
         refs.push({ designId, lineIdx, plan, line, piece: pieces[lineIdx], grade, totalArea: num(line.sqm) || num(plan.totalAreaSqm) });
       });
@@ -303,6 +331,7 @@
   window.WeaveFloorEngine = {
     KEY_FLOOR, KEY_YARN_REQ, KEY_QC, KEY_NOTIFY, QC_RESULTS,
     loadFloorAll, ensureDesignFloor, saveDesignFloor, ensurePieceRec, ensureDayRec,
+    addExtraLoom, removeExtraLoom, lineOrCustomFor,
     timeToDec, shiftHours, shiftManHours, shiftEff, sortedDates, cumulativeDoneBefore,
     dayCarryNormal, dayCarryOt, dayRemaining, pieceDoneTotal,
     loadYarnRequests, saveYarnRequests, addYarnRequest, updateYarnRequest, pendingYarnRequests,
@@ -346,17 +375,22 @@
 
   /* ---------------- Tab 1: ตั้งค่าขึ้นทอ ---------------- */
   function pieceCardHtml(designId, plan, lines, dfloor, idx) {
-    const line = lines[idx];
     const piece = ensurePieceRec(dfloor, idx);
+    const line = lineOrCustomFor(lines, idx, piece);
     const grade = piece.gradeOverride || suggestedGradeFor(plan);
     const totalArea = num(line.sqm) || num(plan.totalAreaSqm);
     const done = pieceDoneTotal(piece);
     const remain = Math.max(0, totalArea - done);
     return `<div class="department-panel pw-card" data-piece="${idx}">
       <div class="pw-body">
+        ${piece.isExtra ? `<div class="pw-row"><span class="status-tag review">จอที่เพิ่มเอง</span><button type="button" class="action-button" data-del-loom="${esc(idx)}" title="ลบจอทอที่เพิ่มเองนี้ (ลบได้เฉพาะจอที่เพิ่มเอง ไม่ใช่จอตามรายการในใบสั่ง)">🗑 ลบจอนี้</button></div>` : ""}
         <div class="pw-row">
-          ${res("ชิ้น/Location", esc(line.location || line.design || `ชิ้นที่ ${idx + 1}`))}
-          ${res("พื้นที่รวม", `${fmt(totalArea, 2)} ตร.ม.`)}
+          ${piece.isExtra
+        ? field("รายละเอียด/อ้างอิงจอนี้", `<input data-pf="customLabel" value="${esc(piece.customLabel)}" placeholder="เช่น จอเสริมแบ่งทอชิ้นที่ 1">`)
+        : res("ชิ้น/Location", esc(line.location || line.design || `ชิ้นที่ ${Number(idx) + 1}`))}
+          ${piece.isExtra
+        ? field("พื้นที่เป้าหมายของจอนี้ (ตร.ม.)", `<input data-pf="customArea" value="${esc(piece.customArea)}" inputmode="decimal" class="pw-num tiny">`)
+        : res("พื้นที่รวม", `${fmt(totalArea, 2)} ตร.ม.`)}
           ${res("ทอไปแล้ว", `${fmt(done, 2)} ตร.ม.`)}
           ${res("คงเหลือ", `${fmt(remain, 2)} ตร.ม.`, remain <= 0.0005 ? "main" : "")}
         </div>
@@ -407,11 +441,16 @@
     if (!plan) return `<p class="col-empty">ไม่พบใบวางแผนงานของ Job นี้</p>`;
     const lines = linesOf(state.designId, plan);
     const dfloor = ensureDesignFloor(state.designId);
+    // จอที่เพิ่มเอง (isExtra) นอกเหนือจากจำนวนไซส์ในใบสั่ง — ใช้ตอนแบ่งทอชิ้นเดียวกันพร้อมกันหลายจอ
+    const extraKeys = Object.keys(dfloor.pieces).filter((k) => dfloor.pieces[k].isExtra);
     return `
     <section class="department-panel pw-card">
-      <div class="panel-heading"><div><strong>ตั้งค่าขึ้นทอต่อชิ้น</strong><small>กำหนดจอทอ/เกรด/แบบอ้างอิงต่อชิ้น (M/O มีหลายชิ้นแยกจอกันได้)</small></div></div>
+      <div class="panel-heading"><div><strong>ตั้งค่าขึ้นทอต่อชิ้น</strong><small>กำหนดจอทอ/เกรด/แบบอ้างอิงต่อชิ้น (M/O มีหลายชิ้นแยกจอกันได้) — ถ้าชิ้นเดียวแบ่งทอพร้อมกันหลายจอ กด "+ เพิ่มจอทอ" เพื่อเพิ่มจอเสริมได้เอง</small></div>
+        <button type="button" class="action-button" data-add-loom="${esc(state.designId)}">+ เพิ่มจอทอ</button>
+      </div>
     </section>
     ${lines.map((l, i) => pieceCardHtml(state.designId, plan, lines, dfloor, i)).join("")}
+    ${extraKeys.map((k) => pieceCardHtml(state.designId, plan, lines, dfloor, k)).join("")}
     ${yarnPotsHtml(state.designId, plan)}`;
   }
 
@@ -451,7 +490,7 @@
     const loomPicker = `<section class="department-panel pw-card"><div class="panel-heading"><div><strong>เลือกจอทอของ M/O นี้</strong></div></div><div class="pw-body">${loomChoiceHtml()}</div></section>`;
     if (state.lineIdx == null) return loomPicker + `<p class="col-empty">เลือกจอด้านบนเพื่อบันทึกประจำวัน</p>`;
     const piece = ensurePieceRec(dfloor, state.lineIdx);
-    const line = lines[state.lineIdx] || { location: `ชิ้นที่ ${Number(state.lineIdx) + 1}`, sqm: 0 };
+    const line = lineOrCustomFor(lines, state.lineIdx, piece);
     const totalArea = num(line.sqm) || num(plan.totalAreaSqm);
     const day = ensureDayRec(piece, state.day);
     const workers = loadWeaveWorkers();
@@ -1141,6 +1180,20 @@
         const dfloor = ensureDesignFloor(state.designId);
         ensurePieceRec(dfloor, idx).patternImage = "";
         saveDesignFloor(state.designId, dfloor);
+        renderAll(); return;
+      }
+      const addLoom = e.target.closest("[data-add-loom]");
+      if (addLoom) {
+        addExtraLoom(addLoom.dataset.addLoom);
+        toast("เพิ่มจอทอใหม่แล้ว — กรอกเบอร์จอ/เกรด/พื้นที่เป้าหมายด้านล่างได้เลย");
+        renderAll(); return;
+      }
+      const delLoom = e.target.closest("[data-del-loom]");
+      if (delLoom) {
+        if (!confirm("ยืนยันลบจอทอที่เพิ่มเองนี้ — บันทึกประจำวันทั้งหมดของจอนี้จะหายไปด้วย")) return;
+        const ok = removeExtraLoom(state.designId, delLoom.dataset.delLoom);
+        if (ok && state.lineIdx === delLoom.dataset.delLoom) state.lineIdx = null;
+        toast(ok ? "ลบจอที่เพิ่มเองแล้ว" : "ลบไม่สำเร็จ — ลบได้เฉพาะจอที่เพิ่มเอง");
         renderAll(); return;
       }
       const reqYarn = e.target.closest("[data-request-yarn]");

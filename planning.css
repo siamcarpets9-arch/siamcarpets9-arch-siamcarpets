@@ -58,6 +58,7 @@
 .pw-job-card-wrap{position:relative;width:100%}
 .pw-job-card-wrap .pw-job-card{width:100%}
 .pw-job-card-wrap .ovw-skip-btn{position:absolute;top:6px;right:6px;margin-left:0;background:#fff}
+.pw-job-card-wrap .pw-job-card-del-btn{position:absolute;top:6px;left:6px;margin-left:0;background:#fff}
 
 /* ตารางโซนสี */
 .pw-zone-scroll,.pw-pot-scroll,.pw-sched-scroll{overflow:auto;margin-bottom:8px}
